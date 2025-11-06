@@ -68,7 +68,11 @@ app.use(limiter);
 // CORS configuration
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' 
-    ? ['https://kabisakabisa-enterprise-ltd-j49p.vercel.app', 'https://kabisakabisa-enterprise-ltd.vercel.app'] 
+    ? [
+        'https://kabisakabisa-enterprise-ltd.vercel.app',
+        'https://kabisakabisa-enterprise-ltd-j49p.vercel.app',
+        'https://kabisakabisa-enterprise-ltd-1osy.vercel.app'
+      ] 
     : ['http://localhost:3000', 'http://192.168.182.134:3000'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
@@ -91,6 +95,11 @@ app.get('/', (req, res) => {
       encryption_key: !!process.env.ENCRYPTION_KEY
     }
   });
+});
+
+// Favicon route
+app.get('/favicon.ico', (req, res) => {
+  res.status(204).end();
 });
 
 // Routes
