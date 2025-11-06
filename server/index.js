@@ -155,7 +155,7 @@ app.post('/api/auth/test', (req, res) => {
 // Airtable diagnostic route
 app.get('/api/airtable-test', async (req, res) => {
   try {
-    const { airtableHelpers, TABLES } = require('./server/config/airtable');
+    const { airtableHelpers, TABLES } = require('./config/airtable');
     
     // Test Employees table
     const employees = await airtableHelpers.find(TABLES.EMPLOYEES);
