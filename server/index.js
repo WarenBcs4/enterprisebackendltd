@@ -53,7 +53,7 @@ app.use(limiter);
 // CORS configuration
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' 
-    ? ['https://yourdomain.com'] 
+    ? ['https://kabisakabisa-enterprise-ltd-1osy.vercel.app'] 
     : ['http://localhost:3000', 'http://192.168.182.134:3000'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
