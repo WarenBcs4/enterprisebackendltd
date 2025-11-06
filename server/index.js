@@ -20,6 +20,7 @@ const accountingRoutes = require('./routes/accounting');
 const receiptRoutes = require('./routes/receipts');
 const reportRoutes = require('./routes/reports');
 const documentRoutes = require('./routes/documents');
+const diagnosticsRoutes = require('./routes/diagnostics');
 const { authenticateToken, authorizeRoles } = require('./middleware/auth');
 
 const app = express();
@@ -161,6 +162,7 @@ app.use('/api/accounting', accountingRoutes);
 app.use('/api/receipts', receiptRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/documents', documentRoutes);
+app.use('/api/diagnostics', diagnosticsRoutes);
 
 // Error handling middleware
 app.use((err, req, res, next) => {

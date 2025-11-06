@@ -179,17 +179,21 @@ router.post('/login', async (req, res) => {
       last_login: new Date().toISOString()
     });
 
+    const userResponse = {
+      id: user.id,
+      email: user.email,
+      fullName: user.full_name,
+      role: user.role,
+      branchId: user.branch_id
+    };
+    
+    console.log('Sending user response:', userResponse);
+    
     res.json({
       success: true,
       accessToken,
       refreshToken,
-      user: {
-        id: user.id,
-        email: user.email,
-        fullName: user.full_name,
-        role: user.role,
-        branchId: user.branch_id
-      }
+      user: userResponse
     });
 
   } catch (error) {
