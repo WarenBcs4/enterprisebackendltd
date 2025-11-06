@@ -1,6 +1,9 @@
 const crypto = require('crypto');
 
 const ALGORITHM = 'aes-256-gcm';
+if (!process.env.ENCRYPTION_KEY) {
+  throw new Error('ENCRYPTION_KEY environment variable is required');
+}
 const KEY = Buffer.from(process.env.ENCRYPTION_KEY, 'utf8');
 
 class Encryption {

@@ -24,6 +24,23 @@ const { authenticateToken, authorizeRoles } = require('./middleware/auth');
 
 const app = express();
 
+// Validate required environment variables
+const requiredEnvVars = [
+  'JWT_SECRET',
+  'JWT_REFRESH_SECRET',
+  'AIRTABLE_API_KEY',
+  'AIRTABLE_BASE_ID',
+  'ENCRYPTION_KEY'
+];
+
+const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
+if (missingVars.length > 0) {
+  console.error('Missing required environment variables:', missingVars);
+  if (process.env.NODE_ENV === 'production') {
+    process.exit(1);
+  }
+}
+
 // Security middleware
 app.use(helmet({
   contentSecurityPolicy: {
@@ -53,7 +70,7 @@ app.use(limiter);
 // CORS configuration
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' 
-    ? ['https://kabisakabisa-enterprise-ltd-1osy.vercel.app'] 
+    ? ['https://kabisakabisa-enterprise-ltd-j49p.vercel.app', 'https://kabisakabisa-enterprise-ltd.vercel.app'] 
     : ['http://localhost:3000', 'http://192.168.182.134:3000'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
