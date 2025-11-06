@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 
 const ALGORITHM = 'aes-256-gcm';
-const KEY = Buffer.from(process.env.ENCRYPTION_KEY || 'default-32-character-key-for-dev', 'utf8');
+const KEY = Buffer.from(process.env.ENCRYPTION_KEY, 'utf8');
 
 class Encryption {
   static encrypt(text) {

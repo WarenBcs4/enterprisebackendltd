@@ -74,7 +74,7 @@ router.post('/employees', authenticateToken, authorizeRoles(['admin', 'boss', 'h
     }
 
     // Use provided password or generate default
-    const finalPassword = password || `${role}password123`;
+    const finalPassword = password || `${role}${process.env.DEFAULT_PASSWORD_SUFFIX || 'pass123'}`;
     const hashedPassword = await bcrypt.hash(finalPassword, 12);
     
     const employeeData = {
