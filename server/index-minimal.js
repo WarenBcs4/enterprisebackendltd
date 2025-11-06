@@ -37,13 +37,79 @@ app.get('/favicon.ico', (req, res) => {
   res.status(204).end();
 });
 
-// Basic auth routes
+// Mock user data
+const mockUsers = [
+  {
+    id: 'user1',
+    email: 'admin@company.com',
+    password: 'password123',
+    fullName: 'System Admin',
+    role: 'admin',
+    branchId: 'branch1'
+  },
+  {
+    id: 'user2', 
+    email: 'boss@company.com',
+    password: 'password123',
+    fullName: 'Company Boss',
+    role: 'boss',
+    branchId: null
+  },
+  {
+    id: 'user3',
+    email: 'manager@company.com', 
+    password: 'password123',
+    fullName: 'Branch Manager',
+    role: 'manager',
+    branchId: 'branch1'
+  }
+];
+
+// Register endpoint
 app.post('/api/auth/register', (req, res) => {
-  res.json({ message: 'Registration endpoint - coming soon' });
+  const { full_name, email, password } = req.body;
+  
+  if (!full_name || !email || !password) {
+    return res.status(400).json({ message: 'All fields are required' });
+  }
+  
+  const existingUser = mockUsers.find(u => u.email === email);
+  if (existingUser) {
+    return res.status(400).json({ message: 'User already exists' });
+  }
+  
+  res.status(201).json({ message: 'Admin account created successfully' });
 });
 
+// Login endpoint
 app.post('/api/auth/login', (req, res) => {
-  res.json({ message: 'Login endpoint - coming soon' });
+  const { email, password } = req.body;
+  
+  if (!email || !password) {
+    return res.status(400).json({ message: 'Email and password are required' });
+  }
+  
+  const user = mockUsers.find(u => u.email === email && u.password === password);
+  
+  if (!user) {
+    return res.status(401).json({ message: 'Invalid credentials' });
+  }
+  
+  const accessToken = 'mock-access-token-' + Date.now();
+  const refreshToken = 'mock-refresh-token-' + Date.now();
+  
+  res.json({
+    success: true,
+    accessToken,
+    refreshToken,
+    user: {
+      id: user.id,
+      email: user.email,
+      fullName: user.fullName,
+      role: user.role,
+      branchId: user.branchId
+    }
+  });
 });
 
 // Public branches route
