@@ -21,6 +21,15 @@ const csrfProtection = (req, res, next) => {
 
 const router = express.Router();
 
+// Test route to verify auth routes are loaded
+router.get('/test', (req, res) => {
+  res.json({ 
+    message: 'Auth routes loaded successfully',
+    timestamp: new Date().toISOString(),
+    available_routes: ['POST /login', 'POST /register', 'POST /refresh']
+  });
+});
+
 // Password validation function
 const validatePassword = (password) => {
   if (!password || password.length < 12) {
