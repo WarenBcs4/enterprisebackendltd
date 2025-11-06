@@ -3,7 +3,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const speakeasy = require('speakeasy');
 const QRCode = require('qrcode');
-const { body, validationResult } = require('express-validator');
+// const { body, validationResult } = require('express-validator');
 const { airtableHelpers, TABLES } = require('../config/airtable');
 const Encryption = require('../utils/encryption');
 
@@ -21,14 +21,16 @@ const csrfProtection = (req, res, next) => {
 
 const router = express.Router();
 
-// Password validation rules
-const passwordValidation = [
-  body('password')
-    .isLength({ min: 12 })
-    .withMessage('Password must be at least 12 characters long')
-    .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/)
-    .withMessage('Password must contain uppercase, lowercase, number and special character')
-];
+// Password validation function
+const validatePassword = (password) => {
+  if (!password || password.length < 12) {
+    return 'Password must be at least 12 characters long';
+  }
+  if (!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/.test(password)) {
+    return 'Password must contain uppercase, lowercase, number and special character';
+  }
+  return null;
+};
 
 // Register admin (first-time setup)
 router.post('/register', async (req, res) => {
@@ -96,17 +98,15 @@ router.post('/register', async (req, res) => {
 });
 
 // Login endpoint
-router.post('/login', [
-  body('email').isEmail().normalizeEmail(),
-  body('password').notEmpty()
-], async (req, res) => {
+router.post('/login', async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+    const { email, password } = req.body;
+    
+    if (!email || !password) {
+      return res.status(400).json({ message: 'Email and password are required' });
     }
 
-    const { email, password, mfaToken } = req.body;
+    const { mfaToken } = req.body;
 
     // Find user by email
     const allUsers = await airtableHelpers.find(TABLES.EMPLOYEES);
@@ -302,11 +302,12 @@ router.post('/refresh', async (req, res) => {
 });
 
 // Change password
-router.post('/change-password', csrfProtection, passwordValidation, async (req, res) => {
+router.post('/change-password', csrfProtection, async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
+    const { newPassword } = req.body;
+    const passwordError = validatePassword(newPassword);
+    if (passwordError) {
+      return res.status(400).json({ message: passwordError });
     }
 
     const { userId, currentPassword, newPassword } = req.body;
