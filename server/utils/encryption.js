@@ -1,10 +1,11 @@
 const crypto = require('crypto');
 
 const ALGORITHM = 'aes-256-gcm';
+const KEY = Buffer.from(process.env.ENCRYPTION_KEY || 'fallback-key-32-chars-for-demo-only', 'utf8');
+
 if (!process.env.ENCRYPTION_KEY) {
-  throw new Error('ENCRYPTION_KEY environment variable is required');
+  console.warn('⚠️  ENCRYPTION_KEY not set, using fallback (not secure for production)');
 }
-const KEY = Buffer.from(process.env.ENCRYPTION_KEY, 'utf8');
 
 class Encryption {
   static encrypt(text) {

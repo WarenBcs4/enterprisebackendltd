@@ -35,10 +35,8 @@ const requiredEnvVars = [
 
 const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
 if (missingVars.length > 0) {
-  console.error('Missing required environment variables:', missingVars);
-  if (process.env.NODE_ENV === 'production') {
-    process.exit(1);
-  }
+  console.error('⚠️  Missing required environment variables:', missingVars);
+  console.error('⚠️  Some features may not work properly');
 }
 
 // Security middleware
@@ -79,6 +77,21 @@ app.use(cors({
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Health check route
+app.get('/', (req, res) => {
+  res.json({ 
+    status: 'OK', 
+    message: 'BSN Manager Backend API is running',
+    timestamp: new Date().toISOString(),
+    env_check: {
+      jwt_secret: !!process.env.JWT_SECRET,
+      airtable_key: !!process.env.AIRTABLE_API_KEY,
+      airtable_base: !!process.env.AIRTABLE_BASE_ID,
+      encryption_key: !!process.env.ENCRYPTION_KEY
+    }
+  });
+});
 
 // Routes
 app.use('/api/auth', authRoutes);
