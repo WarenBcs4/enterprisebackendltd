@@ -64,13 +64,20 @@ router.post('/register', async (req, res) => {
 
     console.log('Checking for existing admins...');
     // Check if any admin already exists
-    const existingAdmins = await airtableHelpers.find(
-      TABLES.EMPLOYEES,
-      '{role} = "admin"'
-    );
-    console.log('Existing admins found:', existingAdmins.length);
+    let existingAdmins;
+    try {
+      existingAdmins = await airtableHelpers.find(
+        TABLES.EMPLOYEES,
+        '{role} = "admin"'
+      );
+      console.log('Existing admins found:', existingAdmins.length);
+    } catch (airtableError) {
+      console.error('Airtable connection error during admin check:', airtableError.message);
+      return res.status(500).json({ message: 'Database connection failed', error: airtableError.message });
+    }
 
-    if (existingAdmins.length > 0) {
+    // Allow multiple admins for development
+    if (existingAdmins.length > 0 && process.env.NODE_ENV === 'production') {
       return res.status(400).json({ message: 'Admin already exists. Use login instead.' });
     }
 
@@ -120,8 +127,15 @@ router.post('/login', async (req, res) => {
     const { mfaToken } = req.body;
 
     // Find user by email
-    const allUsers = await airtableHelpers.find(TABLES.EMPLOYEES);
-    console.log('Users found:', allUsers.length);
+    let allUsers;
+    try {
+      allUsers = await airtableHelpers.find(TABLES.EMPLOYEES);
+      console.log('Users found:', allUsers.length);
+    } catch (airtableError) {
+      console.error('Airtable connection error:', airtableError.message);
+      return res.status(500).json({ message: 'Database connection failed', error: airtableError.message });
+    }
+    
     const user = allUsers.find(u => u.email === email);
     console.log('User found for email:', !!user);
 

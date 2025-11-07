@@ -8,18 +8,38 @@ const router = express.Router();
 router.get('/public', async (req, res) => {
   try {
     console.log('Fetching public branches from Airtable');
-    const branches = await airtableHelpers.find(TABLES.BRANCHES);
-    console.log('Branches found:', branches.length);
+    
+    // Test Airtable connection first
+    if (!process.env.AIRTABLE_API_KEY || !process.env.AIRTABLE_BASE_ID) {
+      console.error('Missing Airtable credentials');
+      return res.status(500).json({ 
+        message: 'Database configuration error',
+        error: 'Missing Airtable credentials'
+      });
+    }
+    
+    let branches;
+    try {
+      branches = await airtableHelpers.find(TABLES.BRANCHES);
+      console.log('Branches found:', branches.length);
+    } catch (airtableError) {
+      console.error('Airtable connection failed:', airtableError.message);
+      return res.status(500).json({ 
+        message: 'Database connection failed',
+        error: airtableError.message,
+        details: 'Check Airtable API key and base ID'
+      });
+    }
     
     // Return only public information
     const publicBranches = branches.map(branch => ({
       id: branch.id,
-      name: branch.branch_name,
-      address: branch.location_address,
-      latitude: branch.latitude,
-      longitude: branch.longitude,
-      phone: branch.phone,
-      email: branch.email
+      name: branch.branch_name || 'Unknown Branch',
+      address: branch.location_address || 'No address provided',
+      latitude: branch.latitude || null,
+      longitude: branch.longitude || null,
+      phone: branch.phone || null,
+      email: branch.email || null
     }));
 
     res.json(publicBranches);
@@ -32,7 +52,7 @@ router.get('/public', async (req, res) => {
     res.status(500).json({ 
       message: 'Failed to fetch branches',
       error: error.message,
-      details: 'Airtable connection issue'
+      details: 'Server error'
     });
   }
 });
