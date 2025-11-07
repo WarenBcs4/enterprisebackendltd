@@ -44,66 +44,61 @@ const validatePassword = (password) => {
 // Register admin (first-time setup)
 router.post('/register', async (req, res) => {
   try {
-    console.log('Register request received');
     const { full_name, email, password, role } = req.body;
 
-    // Validate required fields
     if (!full_name || !email || !password) {
       return res.status(400).json({ message: 'Full name, email, and password are required' });
     }
 
-    // Mock registration success
+    if (role && role !== 'admin') {
+      return res.status(400).json({ message: 'Only admin registration is allowed' });
+    }
+
+    const existingAdmins = await airtableHelpers.find(TABLES.EMPLOYEES, '{role} = "admin"');
+    if (existingAdmins.length > 0 && process.env.NODE_ENV === 'production') {
+      return res.status(400).json({ message: 'Admin already exists. Use login instead.' });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 12);
+    
+    const adminData = {
+      full_name,
+      email,
+      role: 'admin',
+      password_hash: hashedPassword,
+      is_active: true,
+      hire_date: new Date().toISOString().split('T')[0],
+      mfa_enabled: false
+    };
+    
+    await airtableHelpers.create(TABLES.EMPLOYEES, adminData);
     res.status(201).json({ message: 'Admin account created successfully' });
   } catch (error) {
     console.error('Register error:', error.message);
-    res.status(500).json({ message: 'Registration failed' });
+    res.status(500).json({ message: 'Registration failed', error: error.message });
   }
 });
 
 // Login endpoint
 router.post('/login', async (req, res) => {
   try {
-    console.log('Login attempt started');
     const { email, password } = req.body;
     
     if (!email || !password) {
       return res.status(400).json({ message: 'Email and password are required' });
     }
 
-    // Mock user for testing
-    const mockUser = {
-      id: 'rec123',
-      email: 'admin@test.com',
-      full_name: 'Test Admin',
-      role: 'boss',
-      branch_id: 'rec1',
-      password_hash: '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj3bp.Txjzrm', // 'password123'
-      is_active: true
-    };
-
-    // Check credentials
-    if (email !== 'admin@test.com') {
-      return res.status(401).json({ message: 'Invalid credentials' });
-    }
-
-    const isValidPassword = await bcrypt.compare(password, mockUser.password_hash);
-    if (!isValidPassword) {
-      return res.status(401).json({ message: 'Invalid credentials' });
-    }
-
-    const user = mockUser;
-    console.log('User found for email:', !!user);
+    const allUsers = await airtableHelpers.find(TABLES.EMPLOYEES);
+    const user = allUsers.find(u => u.email === email);
 
     if (!user) {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
-    // Check if user is active
     if (!user.is_active) {
       return res.status(401).json({ message: 'Account is deactivated' });
     }
 
-    // Verify password
     const isValidPassword = await bcrypt.compare(password, user.password_hash);
     if (!isValidPassword) {
       return res.status(401).json({ message: 'Invalid credentials' });
@@ -156,7 +151,6 @@ router.post('/login', async (req, res) => {
       { expiresIn: process.env.JWT_REFRESH_EXPIRE || '7d' }
     );
 
-    // Update last login
     await airtableHelpers.update(TABLES.EMPLOYEES, user.id, {
       last_login: new Date().toISOString()
     });
