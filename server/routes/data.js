@@ -190,4 +190,58 @@ router.post('/:tableName/bulk', authenticateToken, authorizeRoles(['boss', 'admi
   }
 });
 
+// Get all logistics data for management (no branch filtering)
+router.get('/logistics/all-data', authenticateToken, authorizeRoles(['boss', 'manager', 'admin']), async (req, res) => {
+  try {
+    // Fetch all logistics-related data with error handling
+    const vehicles = await airtableHelpers.find(TABLES.VEHICLES).catch(() => []);
+    const trips = await airtableHelpers.find(TABLES.TRIPS).catch(() => []);
+    const maintenance = await airtableHelpers.find(TABLES.VEHICLE_MAINTENANCE).catch(() => []);
+    const expenses = await airtableHelpers.find(TABLES.EXPENSES).catch(() => []);
+
+    // Calculate comprehensive statistics
+    const totalProfit = trips.reduce((sum, t) => sum + ((parseFloat(t.amount_charged) || 0) - (parseFloat(t.fuel_cost) || 0)), 0);
+    const stats = {
+      totalVehicles: vehicles.length,
+      activeVehicles: vehicles.filter(v => v.status === 'active' || !v.status).length,
+      totalTrips: trips.length,
+      totalRevenue: trips.reduce((sum, t) => sum + (parseFloat(t.amount_charged) || 0), 0),
+      totalFuelCost: trips.reduce((sum, t) => sum + (parseFloat(t.fuel_cost) || 0), 0),
+      totalProfit,
+      totalDistance: trips.reduce((sum, t) => sum + (parseFloat(t.distance_km) || 0), 0),
+      maintenanceCost: maintenance.reduce((sum, m) => sum + (parseFloat(m.cost) || 0), 0),
+      avgProfitPerTrip: trips.length > 0 ? totalProfit / trips.length : 0
+    };
+
+    // Vehicle performance analysis
+    const vehiclePerformance = vehicles.map(vehicle => {
+      const vehicleTrips = trips.filter(t => t.vehicle_plate_number === vehicle.plate_number);
+      const vehicleMaintenance = maintenance.filter(m => m.vehicle_plate_number === vehicle.plate_number);
+      
+      return {
+        ...vehicle,
+        tripCount: vehicleTrips.length,
+        totalRevenue: vehicleTrips.reduce((sum, t) => sum + (parseFloat(t.amount_charged) || 0), 0),
+        totalProfit: vehicleTrips.reduce((sum, t) => sum + ((parseFloat(t.amount_charged) || 0) - (parseFloat(t.fuel_cost) || 0)), 0),
+        totalDistance: vehicleTrips.reduce((sum, t) => sum + (parseFloat(t.distance_km) || 0), 0),
+        maintenanceCost: vehicleMaintenance.reduce((sum, m) => sum + (parseFloat(m.cost) || 0), 0),
+        lastTripDate: vehicleTrips.length > 0 ? new Date(Math.max(...vehicleTrips.map(t => new Date(t.trip_date).getTime()))).toISOString() : null,
+        lastMaintenanceDate: vehicleMaintenance.length > 0 ? new Date(Math.max(...vehicleMaintenance.map(m => new Date(m.maintenance_date).getTime()))).toISOString() : null
+      };
+    });
+
+    res.json({
+      vehicles,
+      trips: trips.sort((a, b) => new Date(b.trip_date || 0) - new Date(a.trip_date || 0)),
+      maintenance: maintenance.sort((a, b) => new Date(b.maintenance_date || 0) - new Date(a.maintenance_date || 0)),
+      expenses: expenses.sort((a, b) => new Date(b.expense_date || 0) - new Date(a.expense_date || 0)),
+      stats,
+      vehiclePerformance
+    });
+  } catch (error) {
+    console.error('Error fetching logistics data:', error);
+    res.status(500).json({ message: 'Failed to fetch logistics data', error: error.message });
+  }
+});
+
 module.exports = router;
