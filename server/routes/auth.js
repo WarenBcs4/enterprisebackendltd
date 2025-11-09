@@ -30,6 +30,8 @@ router.get('/test', (req, res) => {
   });
 });
 
+
+
 // Password validation function
 const validatePassword = (password) => {
   if (!password || password.length < 12) {
@@ -92,6 +94,8 @@ router.post('/login', async (req, res) => {
       return res.status(500).json({ message: 'Database not configured' });
     }
 
+
+
     const allUsers = await airtableHelpers.find(TABLES.EMPLOYEES);
     const user = allUsers.find(u => u.email === email);
 
@@ -101,6 +105,10 @@ router.post('/login', async (req, res) => {
 
     if (!user.is_active) {
       return res.status(401).json({ message: 'Account is deactivated' });
+    }
+
+    if (!user.password_hash) {
+      return res.status(401).json({ message: 'Account not properly configured' });
     }
 
     const isValidPassword = await bcrypt.compare(password, user.password_hash);
@@ -183,15 +191,22 @@ router.post('/login', async (req, res) => {
     res.json(finalResponse);
 
   } catch (error) {
-    console.error('Login error details:', {
-      message: error.message,
-      stack: error.stack,
-      name: error.name
+    console.error('=== LOGIN ERROR DETAILS ===');
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
+    console.error('Error name:', error.name);
+    console.error('Request body:', req.body);
+    console.error('Environment check:', {
+      hasAirtableKey: !!process.env.AIRTABLE_API_KEY,
+      hasAirtableBase: !!process.env.AIRTABLE_BASE_ID,
+      hasJwtSecret: !!process.env.JWT_SECRET
     });
+    console.error('=== END LOGIN ERROR ===');
+    
     res.status(500).json({ 
       message: 'Login failed',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error',
-      details: error.message
+      error: error.message,
+      details: error.stack
     });
   }
 });
