@@ -26,8 +26,70 @@ router.get('/test', (req, res) => {
   res.json({ 
     message: 'Auth routes loaded successfully',
     timestamp: new Date().toISOString(),
-    available_routes: ['POST /login', 'POST /register', 'POST /refresh']
+    available_routes: ['POST /login', 'POST /register', 'POST /refresh'],
+    environment: {
+      hasAirtableKey: !!process.env.AIRTABLE_API_KEY,
+      hasAirtableBase: !!process.env.AIRTABLE_BASE_ID,
+      hasJwtSecret: !!process.env.JWT_SECRET,
+      nodeEnv: process.env.NODE_ENV
+    }
   });
+});
+
+// Diagnostic route for Airtable connection
+router.get('/test-airtable', async (req, res) => {
+  try {
+    console.log('Testing Airtable connection...');
+    
+    // Check environment variables
+    const envCheck = {
+      hasApiKey: !!process.env.AIRTABLE_API_KEY,
+      hasBaseId: !!process.env.AIRTABLE_BASE_ID,
+      apiKeyLength: process.env.AIRTABLE_API_KEY ? process.env.AIRTABLE_API_KEY.length : 0,
+      baseIdLength: process.env.AIRTABLE_BASE_ID ? process.env.AIRTABLE_BASE_ID.length : 0
+    };
+    
+    console.log('Environment check:', envCheck);
+    
+    if (!process.env.AIRTABLE_API_KEY || !process.env.AIRTABLE_BASE_ID) {
+      return res.status(500).json({
+        status: 'error',
+        message: 'Missing Airtable configuration',
+        envCheck
+      });
+    }
+    
+    // Test Airtable connection
+    const allUsers = await airtableHelpers.find(TABLES.EMPLOYEES);
+    console.log('Found users:', allUsers.length);
+    
+    const sampleUser = allUsers.length > 0 ? {
+      id: allUsers[0].id,
+      email: allUsers[0].email,
+      role: allUsers[0].role,
+      hasPassword: !!allUsers[0].password_hash,
+      isActive: allUsers[0].is_active
+    } : null;
+    
+    res.json({
+      status: 'success',
+      message: 'Airtable connection working',
+      envCheck,
+      usersFound: allUsers.length,
+      sampleUser,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('Airtable test error:', error);
+    res.status(500).json({
+      status: 'error',
+      message: error.message,
+      errorType: error.name,
+      stack: error.stack,
+      timestamp: new Date().toISOString()
+    });
+  }
 });
 
 
@@ -86,18 +148,45 @@ router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
     
+    console.log('=== LOGIN ATTEMPT ===');
+    console.log('Email:', email);
+    console.log('Environment check:', {
+      hasAirtableKey: !!process.env.AIRTABLE_API_KEY,
+      hasAirtableBase: !!process.env.AIRTABLE_BASE_ID,
+      hasJwtSecret: !!process.env.JWT_SECRET,
+      keyLength: process.env.AIRTABLE_API_KEY ? process.env.AIRTABLE_API_KEY.length : 0,
+      baseLength: process.env.AIRTABLE_BASE_ID ? process.env.AIRTABLE_BASE_ID.length : 0
+    });
+    
     if (!email || !password) {
       return res.status(400).json({ message: 'Email and password are required' });
     }
 
     if (!process.env.AIRTABLE_API_KEY || !process.env.AIRTABLE_BASE_ID) {
+      console.error('Missing Airtable configuration:', {
+        hasApiKey: !!process.env.AIRTABLE_API_KEY,
+        hasBaseId: !!process.env.AIRTABLE_BASE_ID
+      });
       return res.status(500).json({ message: 'Database not configured' });
     }
 
+    console.log('Airtable config check passed, fetching users...');
 
-
-    const allUsers = await airtableHelpers.find(TABLES.EMPLOYEES);
-    const user = allUsers.find(u => u.email === email);
+    // Find user in Airtable
+    let allUsers, user;
+    try {
+      allUsers = await airtableHelpers.find(TABLES.EMPLOYEES);
+      console.log('Found', allUsers.length, 'users in database');
+      user = allUsers.find(u => u.email === email);
+      console.log('User found:', !!user);
+    } catch (airtableError) {
+      console.error('Airtable connection error:', {
+        message: airtableError.message,
+        stack: airtableError.stack,
+        name: airtableError.name
+      });
+      throw new Error(`Database connection failed: ${airtableError.message}`);
+    }
 
     if (!user) {
       return res.status(401).json({ message: 'Invalid credentials' });
@@ -111,7 +200,9 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ message: 'Account not properly configured' });
     }
 
+    // Verify password
     const isValidPassword = await bcrypt.compare(password, user.password_hash);
+    
     if (!isValidPassword) {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
@@ -164,9 +255,14 @@ router.post('/login', async (req, res) => {
       { expiresIn: process.env.JWT_REFRESH_EXPIRE || '7d' }
     );
 
-    await airtableHelpers.update(TABLES.EMPLOYEES, user.id, {
-      last_login: new Date().toISOString()
-    });
+    // Update last login (optional, don't fail if this fails)
+    try {
+      await airtableHelpers.update(TABLES.EMPLOYEES, user.id, {
+        last_login: new Date().toISOString()
+      });
+    } catch (updateError) {
+      console.warn('Failed to update last login:', updateError.message);
+    }
 
     const userResponse = {
       id: user.id,
@@ -195,18 +291,21 @@ router.post('/login', async (req, res) => {
     console.error('Error message:', error.message);
     console.error('Error stack:', error.stack);
     console.error('Error name:', error.name);
-    console.error('Request body:', req.body);
+    console.error('Request body:', { email: req.body.email, hasPassword: !!req.body.password });
     console.error('Environment check:', {
       hasAirtableKey: !!process.env.AIRTABLE_API_KEY,
       hasAirtableBase: !!process.env.AIRTABLE_BASE_ID,
-      hasJwtSecret: !!process.env.JWT_SECRET
+      hasJwtSecret: !!process.env.JWT_SECRET,
+      airtableKeyLength: process.env.AIRTABLE_API_KEY ? process.env.AIRTABLE_API_KEY.length : 0,
+      baseIdLength: process.env.AIRTABLE_BASE_ID ? process.env.AIRTABLE_BASE_ID.length : 0
     });
     console.error('=== END LOGIN ERROR ===');
     
     res.status(500).json({ 
       message: 'Login failed',
       error: error.message,
-      details: error.stack
+      errorType: error.name,
+      timestamp: new Date().toISOString()
     });
   }
 });
