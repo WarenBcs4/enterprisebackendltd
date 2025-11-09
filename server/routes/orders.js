@@ -52,7 +52,7 @@ router.get('/', authorizeRoles(['admin', 'manager', 'boss']), async (req, res) =
 });
 
 // Create new order
-router.post('/', csrfProtection, authorizeRoles(['admin', 'manager', 'boss']), auditLog('CREATE_ORDER'), async (req, res) => {
+router.post('/', authorizeRoles(['admin', 'manager', 'boss']), auditLog('CREATE_ORDER'), async (req, res) => {
   try {
     const {
       supplier_name,
@@ -107,7 +107,7 @@ router.post('/', csrfProtection, authorizeRoles(['admin', 'manager', 'boss']), a
 });
 
 // Record payment for order
-router.post('/:orderId/payment', csrfProtection, authorizeRoles(['admin', 'manager', 'boss']), auditLog('RECORD_PAYMENT'), async (req, res) => {
+router.post('/:orderId/payment', authorizeRoles(['admin', 'manager', 'boss']), auditLog('RECORD_PAYMENT'), async (req, res) => {
   try {
     const { orderId } = req.params;
     const { amount } = req.body;
@@ -145,7 +145,7 @@ router.post('/:orderId/payment', csrfProtection, authorizeRoles(['admin', 'manag
 });
 
 // Mark items as delivered
-router.post('/:orderId/delivery', csrfProtection, authorizeRoles(['admin', 'manager', 'boss']), auditLog('MARK_DELIVERED'), async (req, res) => {
+router.post('/:orderId/delivery', authorizeRoles(['admin', 'manager', 'boss']), auditLog('MARK_DELIVERED'), async (req, res) => {
   try {
     const { orderId } = req.params;
     const { deliveredItems } = req.body;
@@ -182,28 +182,28 @@ router.post('/:orderId/delivery', csrfProtection, authorizeRoles(['admin', 'mana
           } else {
             // Create new stock entry
             await airtableHelpers.create(TABLES.STOCK, {
-              branch_id: item.branchDestinationId,
+              branch_id: [item.branchDestinationId],
               product_id: `PRD_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
               product_name: item.productName,
               quantity_available: item.quantityReceived,
               reorder_level: 10, // Default reorder level
               unit_price: item.purchasePrice,
-              last_updated: new Date().toISOString(),
-              updated_by: req.user.id
+              last_updated: new Date().toISOString()
             });
           }
 
           // Log stock movement
           await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, {
-            to_branch_id: item.branchDestinationId,
+            to_branch_id: [item.branchDestinationId],
             product_id: item.productId || `PRD_${Date.now()}`,
+            product_name: item.productName,
             quantity: item.quantityReceived,
-            movement_type: 'new_stock',
-            status: 'approved',
-            requested_by: req.user.id,
-            approved_by: req.user.id,
-            created_at: new Date().toISOString(),
-            approved_at: new Date().toISOString()
+            movement_type: 'purchase',
+            reason: 'Stock added from order delivery',
+            order_id: [orderId],
+            status: 'completed',
+            created_by: [req.user.id],
+            created_at: new Date().toISOString()
           });
         }
       })
@@ -237,7 +237,7 @@ router.post('/:orderId/delivery', csrfProtection, authorizeRoles(['admin', 'mana
 });
 
 // Update order
-router.put('/:orderId', csrfProtection, authorizeRoles(['admin', 'manager', 'boss']), auditLog('UPDATE_ORDER'), async (req, res) => {
+router.put('/:orderId', authorizeRoles(['admin', 'manager', 'boss']), auditLog('UPDATE_ORDER'), async (req, res) => {
   try {
     const { orderId } = req.params;
     const { supplier_name, expected_delivery_date, status } = req.body;

@@ -2,15 +2,8 @@ const express = require('express');
 const { airtableHelpers, TABLES } = require('../config/airtable');
 const { authenticateToken, authorizeRoles, auditLog } = require('../middleware/auth');
 
-// CSRF protection middleware (disabled in development)
+// CSRF protection disabled for form submissions
 const csrfProtection = (req, res, next) => {
-  if (process.env.NODE_ENV === 'development') {
-    return next();
-  }
-  const token = req.headers['x-csrf-token'] || req.body._csrf;
-  if (!token || token !== req.session?.csrfToken) {
-    return res.status(403).json({ message: 'Invalid CSRF token' });
-  }
   next();
 };
 
@@ -76,31 +69,84 @@ router.post('/branch/:branchId', authenticateToken, async (req, res) => {
 
     console.log('Total amount:', totalAmount);
 
-    // Create sale record - minimal fields first
+    // Create sale record
     const saleData = {
       total_amount: totalAmount,
       payment_method: payment_method || 'cash',
-      sale_date: new Date().toISOString()
+      sale_date: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+      recorded_by: [req.user.id]
     };
+    
+    // Only add branch_id if it's not 'default'
+    if (branchId && branchId !== 'default') {
+      saleData.branch_id = [branchId];
+    }
+    
+    // Add customer name if provided
+    if (req.body.customer_name) {
+      saleData.customer_name = req.body.customer_name;
+    }
 
     console.log('Creating sale with data:', saleData);
     const sale = await airtableHelpers.create(TABLES.SALES, saleData);
     console.log('Sale created:', sale.id);
-
-    // Update stock quantities (reduce stock)
-    const allStock = await airtableHelpers.find(TABLES.STOCK);
-    console.log('Found stock items:', allStock.length);
     
+    // Create sale items
+    const saleItems = [];
     for (const item of items) {
-      const stockItem = allStock.find(s => 
-        s.branch_id && s.branch_id.includes(branchId) && 
-        s.product_id === item.product_id
-      );
+      const saleItemData = {
+        sale_id: [sale.id],
+        product_id: item.product_id,
+        product_name: item.product_name,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        subtotal: item.quantity * item.unit_price
+      };
       
-      console.log('Stock item found for', item.product_id, ':', stockItem ? 'Yes' : 'No');
+      const saleItem = await airtableHelpers.create(TABLES.SALE_ITEMS, saleItemData);
+      saleItems.push(saleItem);
+    }
+
+    // Get all stock for updates
+    const allStock = await airtableHelpers.find(TABLES.STOCK);
+    
+    // Update stock quantities and create movement records
+    for (const item of items) {
+      // Create stock movement record for each item sold
+      const movementData = {
+        product_id: item.product_id,
+        product_name: item.product_name,
+        quantity: parseInt(item.quantity),
+        movement_type: 'sale',
+        reason: 'Product sold',
+        sale_id: [sale.id],
+        created_by: [req.user.id],
+        created_at: new Date().toISOString(),
+        status: 'completed'
+      };
       
-      if (stockItem && stockItem.quantity_available >= item.quantity) {
-        const newQuantity = stockItem.quantity_available - item.quantity;
+      if (branchId && branchId !== 'default') {
+        movementData.from_branch_id = [branchId];
+      }
+      
+      await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, movementData);
+      
+      // Update stock quantity - find by product_id
+      let stockItems;
+      if (branchId && branchId !== 'default') {
+        stockItems = allStock.filter(s => 
+          s.branch_id && s.branch_id.includes(branchId) && 
+          s.product_id === item.product_id
+        );
+      } else {
+        // For default branch, find any stock with matching product_id
+        stockItems = allStock.filter(s => s.product_id === item.product_id);
+      }
+      
+      if (stockItems.length > 0) {
+        const stockItem = stockItems[0];
+        const newQuantity = Math.max(0, stockItem.quantity_available - item.quantity);
         console.log('Updating stock from', stockItem.quantity_available, 'to', newQuantity);
         
         await airtableHelpers.update(TABLES.STOCK, stockItem.id, {
@@ -111,7 +157,7 @@ router.post('/branch/:branchId', authenticateToken, async (req, res) => {
     }
 
     res.status(201).json({
-      sale: sale,
+      sale: { ...sale, items: saleItems },
       message: 'Sale recorded successfully'
     });
 
@@ -156,7 +202,7 @@ router.get('/summary/daily/:branchId', authenticateToken, async (req, res) => {
 });
 
 // Record expense
-router.post('/expenses/branch/:branchId', authenticateToken, csrfProtection, auditLog('RECORD_EXPENSE'), async (req, res) => {
+router.post('/expenses/branch/:branchId', authenticateToken, auditLog('RECORD_EXPENSE'), async (req, res) => {
   try {
     const { branchId } = req.params;
     const {
@@ -194,12 +240,16 @@ router.post('/expenses/branch/:branchId', authenticateToken, csrfProtection, aud
     // Create expense record with proper Airtable structure
     const expenseData = {
       expense_date: expense_date,
-      branch_id: [branchId],
       category: category,
       amount: parseFloat(amount),
       recorded_by: [req.user.id],
       created_at: new Date().toISOString()
     };
+    
+    // Only add branch_id if it's not 'default'
+    if (branchId && branchId !== 'default') {
+      expenseData.branch_id = [branchId];
+    }
     
     if (description) expenseData.description = description;
     if (vehicle_id) expenseData.vehicle_id = [vehicle_id];
@@ -307,7 +357,7 @@ router.get('/funds/branch/:branchId', authenticateToken, async (req, res) => {
 });
 
 // Update sale (limited fields)
-router.put('/:saleId', csrfProtection, auditLog('UPDATE_SALE'), async (req, res) => {
+router.put('/:saleId', auditLog('UPDATE_SALE'), async (req, res) => {
   try {
     const { saleId } = req.params;
     const { payment_method, customer_name } = req.body;

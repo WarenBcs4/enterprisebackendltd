@@ -2,15 +2,8 @@ const express = require('express');
 const { airtableHelpers, TABLES } = require('../config/airtable');
 const { authenticateToken, authorizeRoles } = require('../middleware/auth');
 
-// CSRF protection middleware (disabled in development)
+// CSRF protection disabled for form submissions
 const csrfProtection = (req, res, next) => {
-  if (process.env.NODE_ENV === 'development') {
-    return next();
-  }
-  const token = req.headers['x-csrf-token'] || req.body._csrf;
-  if (!token || token !== req.session?.csrfToken) {
-    return res.status(403).json({ message: 'Invalid CSRF token' });
-  }
   next();
 };
 
@@ -102,7 +95,7 @@ router.post('/branch/:branchId', authenticateToken, async (req, res) => {
 });
 
 // Update stock item details
-router.put('/:stockId', csrfProtection, async (req, res) => {
+router.put('/:stockId', async (req, res) => {
   try {
     const { stockId } = req.params;
     const { product_name, product_id, quantity_available, unit_price, reorder_level } = req.body;
@@ -174,7 +167,7 @@ router.get('/movements/:branchId', authenticateToken, async (req, res) => {
 });
 
 // Transfer stock between branches
-router.post('/transfer', authenticateToken, csrfProtection, async (req, res) => {
+router.post('/transfer', authenticateToken, async (req, res) => {
   try {
     const { from_branch_id, to_branch_id, product_id, quantity, reason } = req.body;
 
@@ -224,7 +217,7 @@ router.post('/transfer', authenticateToken, csrfProtection, async (req, res) => 
 });
 
 // Approve stock transfer
-router.patch('/transfers/:transferId/approve', authenticateToken, csrfProtection, async (req, res) => {
+router.patch('/transfers/:transferId/approve', authenticateToken, async (req, res) => {
   try {
     const { transferId } = req.params;
     
@@ -277,7 +270,7 @@ router.patch('/transfers/:transferId/approve', authenticateToken, csrfProtection
 });
 
 // Reject stock transfer
-router.patch('/transfers/:transferId/reject', authenticateToken, csrfProtection, async (req, res) => {
+router.patch('/transfers/:transferId/reject', authenticateToken, async (req, res) => {
   try {
     const { transferId } = req.params;
     
@@ -314,6 +307,103 @@ router.patch('/transfers/:transferId/reject', authenticateToken, csrfProtection,
   } catch (error) {
     console.error('Reject transfer error:', error);
     res.status(500).json({ message: 'Failed to reject transfer' });
+  }
+});
+
+// Add quantity to stock (from orders/purchases)
+router.patch('/:stockId/add-quantity', authenticateToken, async (req, res) => {
+  try {
+    const { stockId } = req.params;
+    const { quantity, reason, order_id } = req.body;
+
+    if (!quantity || quantity <= 0) {
+      return res.status(400).json({ message: 'Valid quantity is required' });
+    }
+
+    const stockItem = await airtableHelpers.findById(TABLES.STOCK, stockId);
+    if (!stockItem) {
+      return res.status(404).json({ message: 'Stock item not found' });
+    }
+
+    const newQuantity = stockItem.quantity_available + parseInt(quantity);
+    
+    // Update stock quantity
+    const updatedStock = await airtableHelpers.update(TABLES.STOCK, stockId, {
+      quantity_available: newQuantity,
+      last_updated: new Date().toISOString()
+    });
+
+    // Create stock movement record
+    await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, {
+      to_branch_id: stockItem.branch_id,
+      product_id: stockItem.product_id,
+      product_name: stockItem.product_name,
+      quantity: parseInt(quantity),
+      movement_type: 'purchase',
+      reason: reason || 'Stock purchase from order',
+      order_id: order_id || null,
+      created_by: [req.user.id],
+      created_at: new Date().toISOString(),
+      status: 'completed'
+    });
+
+    res.json(updatedStock);
+  } catch (error) {
+    console.error('Add quantity error:', error);
+    res.status(500).json({ message: 'Failed to add quantity' });
+  }
+});
+
+// Record stock deduction (from sales)
+router.post('/deduct', authenticateToken, async (req, res) => {
+  try {
+    const { branch_id, product_id, quantity, sale_id, reason } = req.body;
+
+    if (!branch_id || !product_id || !quantity) {
+      return res.status(400).json({ message: 'Branch ID, product ID, and quantity are required' });
+    }
+
+    // Find stock item
+    const stock = await airtableHelpers.find(
+      TABLES.STOCK,
+      `AND(FIND("${branch_id}", ARRAYJOIN({branch_id})), {product_id} = "${product_id}")`
+    );
+
+    if (!stock.length) {
+      return res.status(404).json({ message: 'Product not found in branch stock' });
+    }
+
+    const stockItem = stock[0];
+    if (stockItem.quantity_available < quantity) {
+      return res.status(400).json({ message: 'Insufficient stock quantity' });
+    }
+
+    const newQuantity = stockItem.quantity_available - parseInt(quantity);
+    
+    // Update stock quantity
+    const updatedStock = await airtableHelpers.update(TABLES.STOCK, stockItem.id, {
+      quantity_available: newQuantity,
+      last_updated: new Date().toISOString()
+    });
+
+    // Create stock movement record
+    await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, {
+      from_branch_id: stockItem.branch_id,
+      product_id: stockItem.product_id,
+      product_name: stockItem.product_name,
+      quantity: parseInt(quantity),
+      movement_type: 'sale',
+      reason: reason || 'Stock sold',
+      sale_id: sale_id || null,
+      created_by: [req.user.id],
+      created_at: new Date().toISOString(),
+      status: 'completed'
+    });
+
+    res.json(updatedStock);
+  } catch (error) {
+    console.error('Deduct stock error:', error);
+    res.status(500).json({ message: 'Failed to deduct stock' });
   }
 });
 

@@ -190,6 +190,174 @@ router.post('/:tableName/bulk', authenticateToken, authorizeRoles(['boss', 'admi
   }
 });
 
+// Get page-specific data with branch filtering
+router.get('/page/:pageName', authenticateToken, async (req, res) => {
+  try {
+    const { pageName } = req.params;
+    const { branchId } = req.query;
+    
+    // Determine which branch to filter by
+    let filterBranchId = branchId;
+    if (!filterBranchId && req.user.role !== 'boss' && req.user.role !== 'manager') {
+      filterBranchId = req.user.branchId;
+    }
+    
+    switch (pageName) {
+      case 'hr':
+        // Fetch HR-related data
+        const employees = await airtableHelpers.find(TABLES.EMPLOYEES).catch(() => []);
+        const payroll = await airtableHelpers.find(TABLES.PAYROLL).catch(() => []);
+        const branches = await airtableHelpers.find(TABLES.BRANCHES).catch(() => []);
+        
+        // Clean and format data
+        const cleanEmployees = employees.map(emp => ({
+          id: emp.id,
+          full_name: emp.full_name || '',
+          email: emp.email || '',
+          phone: emp.phone || '',
+          role: emp.role || '',
+          branch_id: Array.isArray(emp.branch_id) ? emp.branch_id[0] : emp.branch_id,
+          is_active: emp.is_active !== false,
+          hire_date: emp.hire_date || '',
+          salary: emp.salary || 0,
+          driver_license: emp.driver_license || null,
+          vehicle_assigned: emp.vehicle_assigned || false
+        }));
+        
+        const cleanPayroll = payroll.map(p => ({
+          id: p.id,
+          employee_id: Array.isArray(p.employee_id) ? p.employee_id[0] : p.employee_id,
+          employee_name: p.employee_name || '',
+          employee_email: p.employee_email || '',
+          period_start: p.period_start || '',
+          period_end: p.period_end || '',
+          gross_salary: p.gross_salary || '0',
+          deductions: p.deductions || '0',
+          net_salary: p.net_salary || '0',
+          payment_status: p.payment_status || 'pending',
+          payslip_sent: p.payslip_sent || false,
+          payslip_sent_date: p.payslip_sent_date || null,
+          created_at: p.created_at || new Date().toISOString(),
+          generated_by: p.generated_by || 'system'
+        }));
+        
+        const cleanBranches = branches.map(b => ({
+          id: b.id,
+          branch_name: b.branch_name || '',
+          location_address: b.location_address || '',
+          manager_id: Array.isArray(b.manager_id) ? b.manager_id[0] : b.manager_id,
+          phone: b.phone || '',
+          email: b.email || ''
+        }));
+        
+        res.json({
+          employees: cleanEmployees,
+          payroll: cleanPayroll,
+          branches: cleanBranches
+        });
+        break;
+        
+      case 'logistics':
+        // Existing logistics data logic
+        const vehicles = await airtableHelpers.find(TABLES.VEHICLES).catch(() => []);
+        const trips = await airtableHelpers.find(TABLES.TRIPS).catch(() => []);
+        const maintenance = await airtableHelpers.find(TABLES.VEHICLE_MAINTENANCE).catch(() => []);
+        
+        res.json({
+          vehicles: vehicles || [],
+          trips: trips || [],
+          maintenance: maintenance || []
+        });
+        break;
+        
+      case 'admin':
+        // Admin page data with branch filtering
+        let employeeFilter = '';
+        let productFilter = '';
+        
+        if (filterBranchId) {
+          employeeFilter = `{branch_id} = '${filterBranchId}'`;
+          productFilter = `{branch_id} = '${filterBranchId}'`;
+        }
+        
+        const adminEmployees = await airtableHelpers.find(TABLES.EMPLOYEES, employeeFilter).catch(() => []);
+        const adminBranches = await airtableHelpers.find(TABLES.BRANCHES).catch(() => []);
+        const products = await airtableHelpers.find(TABLES.STOCK, productFilter).catch(() => []);
+        
+        res.json({
+          employees: adminEmployees || [],
+          branches: adminBranches || [],
+          products: products || [],
+          selectedBranchId: filterBranchId
+        });
+        break;
+        
+      case 'sales':
+        // Sales page data with branch filtering
+        let stockFilter = '';
+        let salesFilter = '';
+        let expensesFilter = '';
+        
+        if (filterBranchId) {
+          stockFilter = `{branch_id} = '${filterBranchId}'`;
+          salesFilter = `{branch_id} = '${filterBranchId}'`;
+          expensesFilter = `{branch_id} = '${filterBranchId}'`;
+        }
+        
+        const stock = await airtableHelpers.find(TABLES.STOCK, stockFilter).catch(() => []);
+        const sales = await airtableHelpers.find(TABLES.SALES, salesFilter).catch(() => []);
+        const saleItems = await airtableHelpers.find(TABLES.SALE_ITEMS).catch(() => []);
+        const expenses = await airtableHelpers.find(TABLES.EXPENSES, expensesFilter).catch(() => []);
+        const branches = await airtableHelpers.find(TABLES.BRANCHES).catch(() => []);
+        
+        // Clean and format stock data
+        const cleanStock = stock.map(item => ({
+          id: item.id,
+          product_id: item.product_id || item.id,
+          product_name: item.product_name || 'Unknown Product',
+          quantity_available: parseInt(item.quantity_available) || 0,
+          unit_price: parseFloat(item.unit_price) || 0,
+          reorder_level: parseInt(item.reorder_level) || 10,
+          branch_id: Array.isArray(item.branch_id) ? item.branch_id[0] : item.branch_id
+        }));
+        
+        // Clean and format sales data
+        const cleanSales = sales.map(sale => ({
+          id: sale.id,
+          total_amount: parseFloat(sale.total_amount) || 0,
+          payment_method: sale.payment_method || 'cash',
+          customer_name: sale.customer_name || '',
+          sale_date: sale.sale_date || sale.created_at,
+          created_at: sale.created_at || new Date().toISOString(),
+          branch_id: Array.isArray(sale.branch_id) ? sale.branch_id[0] : sale.branch_id
+        }));
+        
+        // Clean branches data
+        const cleanBranches = branches.map(b => ({
+          id: b.id,
+          branch_name: b.branch_name || '',
+          location_address: b.location_address || ''
+        }));
+        
+        res.json({
+          stock: cleanStock,
+          sales: cleanSales,
+          saleItems: saleItems || [],
+          expenses: expenses || [],
+          branches: cleanBranches,
+          selectedBranchId: filterBranchId
+        });
+        break;
+        
+      default:
+        return res.status(400).json({ message: 'Invalid page name' });
+    }
+  } catch (error) {
+    console.error(`Error fetching ${req.params.pageName} page data:`, error);
+    res.status(500).json({ message: 'Failed to fetch page data', error: error.message });
+  }
+});
+
 // Get all logistics data for management (no branch filtering)
 router.get('/logistics/all-data', authenticateToken, authorizeRoles(['boss', 'manager', 'admin']), async (req, res) => {
   try {
@@ -241,6 +409,64 @@ router.get('/logistics/all-data', authenticateToken, authorizeRoles(['boss', 'ma
   } catch (error) {
     console.error('Error fetching logistics data:', error);
     res.status(500).json({ message: 'Failed to fetch logistics data', error: error.message });
+  }
+});
+
+// Get comprehensive dashboard data
+router.get('/dashboard/overview', authenticateToken, async (req, res) => {
+  try {
+    // Fetch all necessary data for dashboard
+    const employees = await airtableHelpers.find(TABLES.EMPLOYEES).catch(() => []);
+    const sales = await airtableHelpers.find(TABLES.SALES).catch(() => []);
+    const stock = await airtableHelpers.find(TABLES.STOCK).catch(() => []);
+    const vehicles = await airtableHelpers.find(TABLES.VEHICLES).catch(() => []);
+    const trips = await airtableHelpers.find(TABLES.TRIPS).catch(() => []);
+    const payroll = await airtableHelpers.find(TABLES.PAYROLL).catch(() => []);
+    
+    // Calculate key metrics
+    const totalEmployees = employees.length;
+    const activeEmployees = employees.filter(emp => emp.is_active).length;
+    const totalDrivers = employees.filter(emp => emp.role === 'logistics').length;
+    const activeDrivers = employees.filter(emp => emp.role === 'logistics' && emp.is_active).length;
+    
+    const totalSales = sales.reduce((sum, sale) => sum + (parseFloat(sale.total_amount) || 0), 0);
+    const totalVehicles = vehicles.length;
+    const totalTrips = trips.length;
+    const totalRevenue = trips.reduce((sum, trip) => sum + (parseFloat(trip.amount_charged) || 0), 0);
+    
+    const pendingPayroll = payroll.filter(p => p.payment_status === 'pending').length;
+    const totalSalaryExpense = employees
+      .filter(emp => emp.is_active && emp.salary)
+      .reduce((sum, emp) => sum + parseFloat(emp.salary || 0), 0);
+    
+    res.json({
+      employees: {
+        total: totalEmployees,
+        active: activeEmployees,
+        drivers: totalDrivers,
+        activeDrivers: activeDrivers
+      },
+      sales: {
+        total: totalSales,
+        count: sales.length
+      },
+      logistics: {
+        vehicles: totalVehicles,
+        trips: totalTrips,
+        revenue: totalRevenue
+      },
+      hr: {
+        pendingPayroll: pendingPayroll,
+        salaryExpense: totalSalaryExpense
+      },
+      stock: {
+        totalItems: stock.length,
+        lowStock: stock.filter(item => (parseFloat(item.quantity) || 0) < 10).length
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching dashboard overview:', error);
+    res.status(500).json({ message: 'Failed to fetch dashboard data', error: error.message });
   }
 });
 
