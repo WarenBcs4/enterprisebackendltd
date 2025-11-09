@@ -202,14 +202,6 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/diagnostics', diagnosticsRoutes);
 app.use('/auth', authCallbackRoutes);
 app.use('/api/data', require('./routes/data'));
-app.use('/api/debug', require('./routes/debug'));
-app.use('/api/tables', require('./routes/table-discovery'));
-app.use('/api/airtable', require('./routes/airtable-setup'));
-app.use('/api/test-data', require('./routes/test-data'));
-app.use('/api/setup', require('./routes/setup-passwords'));
-app.use('/api/fix', require('./routes/fix-employees'));
-app.use('/api/password', require('./routes/password-reset'));
-app.use('/api/check', require('./routes/check-password'));
 
 // Error handling middleware
 app.use((err, req, res, next) => {
