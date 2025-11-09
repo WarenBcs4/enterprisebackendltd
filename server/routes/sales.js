@@ -89,10 +89,11 @@ router.post('/branch/:branchId', authenticateToken, async (req, res) => {
       }
     }
     
-    // Add customer name if provided
-    if (req.body.customer_name) {
-      saleData.customer_name = req.body.customer_name;
-    }
+    // Add customer name if provided (only if field exists)
+    // Note: customer_name field may not exist in Sales table
+    // if (req.body.customer_name) {
+    //   saleData.customer_name = req.body.customer_name;
+    // }
 
     console.log('Creating sale with data:', saleData);
     const sale = await airtableHelpers.create(TABLES.SALES, saleData);

@@ -22,6 +22,7 @@ const reportRoutes = require('./routes/reports');
 const documentRoutes = require('./routes/documents');
 const diagnosticsRoutes = require('./routes/diagnostics');
 const authCallbackRoutes = require('./routes/auth-callback');
+const xeroRoutes = require('./routes/xero');
 const { authenticateToken, authorizeRoles } = require('./middleware/auth');
 
 const app = express();
@@ -37,8 +38,6 @@ const requiredEnvVars = [
 
 const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
 if (missingVars.length > 0) {
-  console.error('❌ Missing required environment variables:', missingVars);
-  console.error('❌ Server cannot start without these variables');
   process.exit(1);
 }
 
@@ -201,11 +200,11 @@ app.use('/api/reports', reportRoutes);
 // Documents route disabled due to Google Drive configuration issues
 app.use('/api/diagnostics', diagnosticsRoutes);
 app.use('/auth', authCallbackRoutes);
+app.use('/api/xero', xeroRoutes);
 app.use('/api/data', require('./routes/data'));
 
 // Error handling middleware
 app.use((err, req, res, next) => {
-  console.error(err.stack);
   res.status(500).json({ 
     message: 'Something went wrong!',
     ...(process.env.NODE_ENV === 'development' && { error: err.message })
@@ -220,7 +219,5 @@ app.use('*', (req, res) => {
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
-  console.log(`🚀 BSN Manager Backend running on port ${PORT}`);
-  console.log(`📍 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🔗 Health check: http://localhost:${PORT}/`);
+  // Server started
 });

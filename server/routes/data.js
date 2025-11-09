@@ -113,17 +113,20 @@ router.post('/:tableName', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'Invalid table name' });
     }
 
-    // Add audit fields
-    const recordData = {
-      ...data,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      created_by: req.user.userId
-    };
+    // Add audit fields only if they exist in the table
+    const recordData = { ...data };
+    
+    // Only add audit fields for tables that support them (exclude Orders)
+    const auditTables = [TABLES.EMPLOYEES, TABLES.STOCK, TABLES.SALES, TABLES.EXPENSES];
+    if (auditTables.includes(tableName) && tableName !== TABLES.ORDERS) {
+      recordData.created_at = new Date().toISOString();
+      recordData.updated_at = new Date().toISOString();
+      recordData.created_by = req.user.userId;
+    }
 
-    // Add branch_id for branch-specific tables
+    // Add branch_id for branch-specific tables (exclude Orders)
     const branchSpecificTables = [TABLES.STOCK, TABLES.SALES, TABLES.EXPENSES, TABLES.EMPLOYEES];
-    if (branchSpecificTables.includes(tableName) && req.user.branchId && !recordData.branch_id) {
+    if (branchSpecificTables.includes(tableName) && tableName !== TABLES.ORDERS && req.user.branchId && !recordData.branch_id) {
       recordData.branch_id = req.user.branchId;
     }
 
@@ -147,12 +150,15 @@ router.put('/:tableName/:recordId', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'Invalid table name' });
     }
 
-    // Add audit fields
-    const updateData = {
-      ...data,
-      updated_at: new Date().toISOString(),
-      updated_by: req.user.userId
-    };
+    // Add audit fields only if they exist in the table
+    const updateData = { ...data };
+    
+    // Only add audit fields for tables that support them (exclude Orders)
+    const auditTables = [TABLES.EMPLOYEES, TABLES.STOCK, TABLES.SALES, TABLES.EXPENSES];
+    if (auditTables.includes(tableName) && tableName !== TABLES.ORDERS) {
+      updateData.updated_at = new Date().toISOString();
+      updateData.updated_by = req.user.userId;
+    }
 
     const record = await directAirtableHelpers.update(tableName, recordId, updateData);
     res.json(record);
@@ -217,22 +223,26 @@ router.post('/:tableName/bulk', authenticateToken, authorizeRoles(['boss', 'admi
     switch (operation) {
       case 'create':
         for (const recordData of records) {
-          const record = await directAirtableHelpers.create(tableName, {
-            ...recordData,
-            created_at: new Date().toISOString(),
-            created_by: req.user.userId
-          });
+          const auditTables = [TABLES.EMPLOYEES, TABLES.STOCK, TABLES.SALES, TABLES.EXPENSES];
+          const dataToCreate = { ...recordData };
+          if (auditTables.includes(tableName) && tableName !== TABLES.ORDERS) {
+            dataToCreate.created_at = new Date().toISOString();
+            dataToCreate.created_by = req.user.userId;
+          }
+          const record = await directAirtableHelpers.create(tableName, dataToCreate);
           results.push(record);
         }
         break;
         
       case 'update':
         for (const { id, data } of records) {
-          const record = await directAirtableHelpers.update(tableName, id, {
-            ...data,
-            updated_at: new Date().toISOString(),
-            updated_by: req.user.userId
-          });
+          const auditTables = [TABLES.EMPLOYEES, TABLES.STOCK, TABLES.SALES, TABLES.EXPENSES];
+          const dataToUpdate = { ...data };
+          if (auditTables.includes(tableName) && tableName !== TABLES.ORDERS) {
+            dataToUpdate.updated_at = new Date().toISOString();
+            dataToUpdate.updated_by = req.user.userId;
+          }
+          const record = await directAirtableHelpers.update(tableName, id, dataToUpdate);
           results.push(record);
         }
         break;

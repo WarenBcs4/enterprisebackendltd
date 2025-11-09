@@ -78,20 +78,19 @@ router.post('/', authorizeRoles(['admin', 'manager', 'boss']), auditLog('CREATE_
       total_amount: totalAmount,
       amount_paid: 0,
       balance_remaining: totalAmount,
-      status: 'ordered',
-      created_by: req.user.id
+      status: 'ordered'
     });
 
     // Create order items
     const orderItems = await Promise.all(
       items.map(item => 
         airtableHelpers.create(TABLES.ORDER_ITEMS, {
-          order_id: order.id,
+          order_id: [order.id], // Array format for linked record
           product_name: item.product_name,
           quantity_ordered: item.quantity_ordered,
           purchase_price_per_unit: item.purchase_price_per_unit,
           quantity_received: 0,
-          branch_destination_id: item.branch_destination_id || null
+          branch_destination_id: item.branch_destination_id ? [item.branch_destination_id] : null
         })
       )
     );
