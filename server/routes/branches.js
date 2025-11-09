@@ -11,7 +11,7 @@ router.get('/public', async (req, res) => {
       return res.status(500).json({ message: 'Airtable not configured' });
     }
 
-    const branches = await airtableHelpers.find(TABLES.BRANCHES);
+    const branches = await airtableHelpers.find(TABLES.BRANCHES).catch(() => []);
     
     const publicBranches = branches.map(branch => ({
       id: branch.id,
@@ -25,8 +25,8 @@ router.get('/public', async (req, res) => {
 
     res.json(publicBranches);
   } catch (error) {
-    console.error('Branches error:', error);
-    res.status(500).json({ message: 'Database connection failed', error: error.message });
+    console.error('Branches public error:', error);
+    res.status(200).json([]);
   }
 });
 

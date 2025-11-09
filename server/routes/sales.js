@@ -123,7 +123,7 @@ router.post('/branch/:branchId', authenticateToken, async (req, res) => {
       const movementData = {
         product_id: item.product_id,
         product_name: item.product_name,
-        quantity: parseInt(item.quantity),
+        quantity_moved: parseInt(item.quantity),
         movement_type: 'sale',
         reason: 'Product sold',
         sale_id: [sale.id],
