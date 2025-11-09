@@ -27,7 +27,7 @@ router.get('/dashboard/:branchId', authenticateToken, authorizeRoles(['boss', 'm
     // Get branch info
     let branch;
     try {
-      const branchRecord = await base('Branches').find(branchId);
+      const branchRecord = await base('branches').find(branchId);
       branch = {
         id: branchRecord.id,
         ...branchRecord.fields
@@ -52,7 +52,7 @@ router.get('/dashboard/:branchId', authenticateToken, authorizeRoles(['boss', 'm
     console.log('Employees found:', employees.length);
 
     // Get all stock
-    const stockRecords = await base('Stock').select().all();
+    const stockRecords = await base('stock').select().all();
     const allStock = stockRecords.map(record => ({
       id: record.id,
       ...record.fields
@@ -65,7 +65,7 @@ router.get('/dashboard/:branchId', authenticateToken, authorizeRoles(['boss', 'm
     console.log('Stock items found:', stock.length, 'for branch:', branchId);
 
     // Get all sales
-    const salesRecords = await base('Sales').select().all();
+    const salesRecords = await base('sales').select().all();
     const allSales = salesRecords.map(record => ({
       id: record.id,
       ...record.fields

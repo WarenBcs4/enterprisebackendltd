@@ -9,14 +9,14 @@ const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
 
 // Table names mapping (exact match with Airtable)
 const TABLES = {
-  BRANCHES: 'Branches',
+  BRANCHES: 'branches',
   EMPLOYEES: 'Employees',
-  STOCK: 'Stock',
+  STOCK: 'stock',
   STOCK_MOVEMENTS: 'Stock_Movements',
-  SALES: 'Sales',
+  SALES: 'sales',
   SALE_ITEMS: 'Sale_Items',
   EXPENSES: 'Expenses',
-  VEHICLES: 'Vehicles',
+  VEHICLES: 'vehicles',
   TRIPS: 'Trips',
   VEHICLE_MAINTENANCE: 'Vehicle_Maintenance',
   ORDERS: 'Orders',
