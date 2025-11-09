@@ -9,7 +9,7 @@ const stream = require('stream');
 const router = express.Router();
 
 // Configure Google Drive API
-let auth = null;
+let auth;
 try {
   if (process.env.GOOGLE_CREDENTIALS_BASE64) {
     // For Vercel deployment - decode base64 credentials
@@ -18,15 +18,15 @@ try {
       credentials,
       scopes: ['https://www.googleapis.com/auth/drive.file']
     });
-  } else if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+  } else {
     // For local development - use file
     auth = new google.auth.GoogleAuth({
-      keyFile: process.env.GOOGLE_SERVICE_ACCOUNT_KEY,
+      keyFile: process.env.GOOGLE_SERVICE_ACCOUNT_KEY || './google-credentials.json',
       scopes: ['https://www.googleapis.com/auth/drive.file']
     });
   }
 } catch (error) {
-  console.warn('Google Drive configuration skipped:', error.message);
+  console.error('Google Drive configuration failed:', error.message);
   auth = null;
 }
 

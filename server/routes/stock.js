@@ -2,8 +2,15 @@ const express = require('express');
 const { airtableHelpers, TABLES } = require('../config/airtable');
 const { authenticateToken, authorizeRoles } = require('../middleware/auth');
 
-// CSRF protection disabled for form submissions
+// CSRF protection middleware (disabled in development)
 const csrfProtection = (req, res, next) => {
+  if (process.env.NODE_ENV === 'development') {
+    return next();
+  }
+  const token = req.headers['x-csrf-token'] || req.body._csrf;
+  if (!token || token !== req.session?.csrfToken) {
+    return res.status(403).json({ message: 'Invalid CSRF token' });
+  }
   next();
 };
 

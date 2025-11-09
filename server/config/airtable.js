@@ -7,24 +7,24 @@ Airtable.configure({
 
 const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
 
-// Table names mapping (exact match with Airtable)
+// Table names mapping (exact match with Airtable - lowercase)
 const TABLES = {
   BRANCHES: 'branches',
-  EMPLOYEES: 'Employees',
+  EMPLOYEES: 'employees',
   STOCK: 'stock',
-  STOCK_MOVEMENTS: 'Stock_Movements',
+  STOCK_MOVEMENTS: 'stock_movements',
   SALES: 'sales',
-  SALE_ITEMS: 'Sale_Items',
-  EXPENSES: 'Expenses',
+  SALE_ITEMS: 'sale_items',
+  EXPENSES: 'expenses',
   VEHICLES: 'vehicles',
-  TRIPS: 'Trips',
-  VEHICLE_MAINTENANCE: 'Vehicle_Maintenance',
-  ORDERS: 'Orders',
-  ORDER_ITEMS: 'Order_Items',
-  PAYROLL: 'Payroll',
-  AUDIT_LOGS: 'Audit_Logs',
-  ERP_SETTINGS: 'ERP_Settings',
-  DOCUMENTS: 'Documents'
+  TRIPS: 'trips',
+  VEHICLE_MAINTENANCE: 'vehicle_maintenance',
+  ORDERS: 'orders',
+  ORDER_ITEMS: 'order_items',
+  PAYROLL: 'payroll',
+  AUDIT_LOGS: 'audit_logs',
+  ERP_SETTINGS: 'erp_settings',
+  DOCUMENTS: 'documents'
 };
 
 // Helper functions for Airtable operations

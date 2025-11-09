@@ -39,7 +39,7 @@ router.get('/dashboard/:branchId', authenticateToken, authorizeRoles(['boss', 'm
     }
 
     // Get all employees
-    const employeeRecords = await base('Employees').select().all();
+    const employeeRecords = await base('employees').select().all();
     const allEmployees = employeeRecords.map(record => ({
       id: record.id,
       ...record.fields

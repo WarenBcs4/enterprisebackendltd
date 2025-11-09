@@ -334,9 +334,9 @@ router.get('/page/:pageName', authenticateToken, async (req, res) => {
           productFilter = `{branch_id} = '${filterBranchId}'`;
         }
         
-        const adminEmployees = await directAirtableHelpers.find(TABLES.EMPLOYEES, employeeFilter).catch(() => []);
-        const adminBranches = await directAirtableHelpers.find(TABLES.BRANCHES).catch(() => []);
-        const products = await directAirtableHelpers.find(TABLES.STOCK, productFilter).catch(() => []);
+        const adminEmployees = await airtableHelpers.find(TABLES.EMPLOYEES, employeeFilter).catch(() => []);
+        const adminBranches = await airtableHelpers.find(TABLES.BRANCHES).catch(() => []);
+        const products = await airtableHelpers.find(TABLES.STOCK, productFilter).catch(() => []);
         
         res.json({
           employees: adminEmployees || [],
@@ -358,11 +358,11 @@ router.get('/page/:pageName', authenticateToken, async (req, res) => {
           expensesFilter = `FIND('${filterBranchId}', ARRAYJOIN({branch_id}))`;
         }
         
-        const stock = await directAirtableHelpers.find(TABLES.STOCK, stockFilter).catch(() => []);
-        const sales = await directAirtableHelpers.find(TABLES.SALES, salesFilter).catch(() => []);
-        const saleItems = await directAirtableHelpers.find(TABLES.SALE_ITEMS).catch(() => []);
-        const expenses = await directAirtableHelpers.find(TABLES.EXPENSES, expensesFilter).catch(() => []);
-        const salesBranches = await directAirtableHelpers.find(TABLES.BRANCHES).catch(() => []);
+        const stock = await airtableHelpers.find(TABLES.STOCK, stockFilter).catch(() => []);
+        const sales = await airtableHelpers.find(TABLES.SALES, salesFilter).catch(() => []);
+        const saleItems = await airtableHelpers.find(TABLES.SALE_ITEMS).catch(() => []);
+        const expenses = await airtableHelpers.find(TABLES.EXPENSES, expensesFilter).catch(() => []);
+        const salesBranches = await airtableHelpers.find(TABLES.BRANCHES).catch(() => []);
         
         // Clean and format stock data
         const cleanStock = stock.map(item => ({

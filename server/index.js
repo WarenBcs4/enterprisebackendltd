@@ -26,9 +26,6 @@ const { authenticateToken, authorizeRoles } = require('./middleware/auth');
 
 const app = express();
 
-// Trust proxy for Vercel deployment
-app.set('trust proxy', 1);
-
 // Validate required environment variables
 const requiredEnvVars = [
   'JWT_SECRET',
@@ -54,17 +51,16 @@ app.use(helmet({
 app.use(compression());
 app.use(cookieParser());
 
-// Rate limiting (disabled for Vercel)
-if (process.env.NODE_ENV !== 'production') {
-  const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 100,
-    message: 'Too many requests from this IP, please try again later.',
-    standardHeaders: true,
-    legacyHeaders: false,
-  });
-  app.use(limiter);
-}
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
+  message: 'Too many requests from this IP, please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+app.use(limiter);
 
 // CORS configuration
 // CORS configuration

@@ -36,6 +36,38 @@ router.get('/test', (req, res) => {
   });
 });
 
+// List all users in database (for debugging)
+router.get('/list-users', async (req, res) => {
+  try {
+    const Airtable = require('airtable');
+    Airtable.configure({
+      endpointUrl: 'https://api.airtable.com',
+      apiKey: process.env.AIRTABLE_API_KEY
+    });
+    const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
+    
+    const records = await base('Employees').select().all();
+    const users = records.map(record => ({
+      id: record.id,
+      email: record.fields.email,
+      full_name: record.fields.full_name,
+      role: record.fields.role,
+      is_active: record.fields.is_active,
+      has_password: !!record.fields.password_hash,
+      branch_id: record.fields.branch_id
+    }));
+    
+    res.json({
+      total_users: users.length,
+      users: users,
+      login_ready: users.filter(u => u.email && u.has_password && u.is_active !== false).length
+    });
+  } catch (error) {
+    console.error('List users error:', error);
+    res.status(500).json({ message: 'Failed to list users', error: error.message });
+  }
+});
+
 // Diagnostic route for Airtable connection
 router.get('/test-airtable', async (req, res) => {
   try {
@@ -121,7 +153,7 @@ const validatePassword = (password) => {
   return null;
 };
 
-// Register admin (first-time setup)
+// Register admin (first-time setup) - ALWAYS ALLOW FOR SETUP
 router.post('/register', async (req, res) => {
   try {
     const { full_name, email, password, role } = req.body;
@@ -132,63 +164,57 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ message: 'Full name, email, and password are required' });
     }
 
-    if (role && role !== 'admin') {
-      return res.status(400).json({ message: 'Only admin registration is allowed' });
-    }
-
-    // Check for existing admins with direct Airtable call
-    let existingAdmins = [];
-    try {
-      const Airtable = require('airtable');
-      Airtable.configure({
-        endpointUrl: 'https://api.airtable.com',
-        apiKey: process.env.AIRTABLE_API_KEY
-      });
-      const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
-      
-      const records = await base('Employees').select({
-        filterByFormula: '{role} = "admin"'
-      }).all();
-      
-      existingAdmins = records.map(record => ({
-        id: record.id,
-        ...record.fields
-      }));
-    } catch (airtableError) {
-      console.warn('Airtable check failed, allowing registration:', airtableError.message);
-    }
-    
-    if (existingAdmins.length > 0 && process.env.NODE_ENV === 'production') {
-      return res.status(400).json({ message: 'Admin already exists. Use login instead.' });
+    // Allow admin or manager registration for initial setup
+    const allowedRoles = ['admin', 'manager', 'boss'];
+    const userRole = role || 'admin';
+    if (!allowedRoles.includes(userRole)) {
+      return res.status(400).json({ message: 'Only admin, manager, or boss registration is allowed' });
     }
 
     const hashedPassword = await bcrypt.hash(password, 12);
     
-    const adminData = {
+    const userData = {
       full_name,
-      email,
-      role: 'admin',
+      email: email.toLowerCase().trim(),
+      role: userRole,
       password_hash: hashedPassword,
       is_active: true,
       hire_date: new Date().toISOString().split('T')[0],
-      mfa_enabled: false
+      mfa_enabled: false,
+      created_at: new Date().toISOString()
     };
     
-    try {
-      const Airtable = require('airtable');
-      const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
-      await base('Employees').create([{ fields: adminData }]);
-      res.status(201).json({ message: 'Admin account created successfully' });
-    } catch (createError) {
-      console.error('Failed to create admin in Airtable:', createError.message);
-      res.status(500).json({ 
-        message: 'Admin account creation failed',
-        error: createError.message
-      });
-    }
+    console.log('Creating user with data:', { ...userData, password_hash: '[HIDDEN]' });
+    
+    const Airtable = require('airtable');
+    Airtable.configure({
+      endpointUrl: 'https://api.airtable.com',
+      apiKey: process.env.AIRTABLE_API_KEY
+    });
+    const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
+    
+    const createdRecords = await base('Employees').create([{ fields: userData }]);
+    const createdUser = createdRecords[0];
+    
+    console.log('User created successfully:', createdUser.id);
+    
+    res.status(201).json({ 
+      message: 'Account created successfully',
+      user: {
+        id: createdUser.id,
+        email: userData.email,
+        full_name: userData.full_name,
+        role: userData.role
+      }
+    });
   } catch (error) {
     console.error('Register error:', error.message);
-    res.status(500).json({ message: 'Registration failed', error: error.message });
+    console.error('Register error stack:', error.stack);
+    res.status(500).json({ 
+      message: 'Registration failed', 
+      error: error.message,
+      details: error.stack
+    });
   }
 });
 
@@ -197,14 +223,12 @@ router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
     
-    console.log('=== LOGIN ATTEMPT ===');
+    console.log('=== LOGIN ATTEMPT (DATABASE ONLY) ===');
     console.log('Email:', email);
     console.log('Environment check:', {
       hasAirtableKey: !!process.env.AIRTABLE_API_KEY,
       hasAirtableBase: !!process.env.AIRTABLE_BASE_ID,
-      hasJwtSecret: !!process.env.JWT_SECRET,
-      keyLength: process.env.AIRTABLE_API_KEY ? process.env.AIRTABLE_API_KEY.length : 0,
-      baseLength: process.env.AIRTABLE_BASE_ID ? process.env.AIRTABLE_BASE_ID.length : 0
+      hasJwtSecret: !!process.env.JWT_SECRET
     });
     
     if (!email || !password) {
@@ -222,45 +246,30 @@ router.post('/login', async (req, res) => {
     console.log('Airtable config check passed, attempting login...');
     console.log('Login credentials check:', { email, hasPassword: !!password });
 
-    // Find user in Airtable with direct connection and fallback
+    // Find user in Airtable - NO FALLBACK, DATABASE ONLY
     let user;
-    try {
-      console.log('Attempting direct Airtable connection...');
-      const Airtable = require('airtable');
-      Airtable.configure({
-        endpointUrl: 'https://api.airtable.com',
-        apiKey: process.env.AIRTABLE_API_KEY
-      });
-      const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
-      
-      const records = await base('Employees').select({
-        filterByFormula: `{email} = '${email}'`
-      }).all();
-      
-      console.log('Found', records.length, 'matching users');
-      
-      if (records.length > 0) {
-        user = {
-          id: records[0].id,
-          ...records[0].fields
-        };
-        console.log('User found via direct connection:', { id: user.id, email: user.email, role: user.role });
-      }
-    } catch (airtableError) {
-      console.error('Airtable error, using fallback auth:', airtableError.message);
-      // Fallback authentication for production reliability
-      if (email === 'warenodhiambo2@gmail.com' && password === 'managerpassword123') {
-        user = {
-          id: 'recco1HdFTUvgQktv',
-          email: 'warenodhiambo2@gmail.com',
-          full_name: 'waren odhiambo',
-          role: 'manager',
-          branch_id: 'rec1XUFQQJxlwpX9T',
-          is_active: true,
-          password_hash: '$2a$12$dummy.hash.for.fallback.auth'
-        };
-        console.log('Using fallback authentication for:', email);
-      }
+    console.log('Attempting direct Airtable connection...');
+    const Airtable = require('airtable');
+    Airtable.configure({
+      endpointUrl: 'https://api.airtable.com',
+      apiKey: process.env.AIRTABLE_API_KEY
+    });
+    const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
+    
+    const records = await base('Employees').select({
+      filterByFormula: `{email} = '${email}'`
+    }).all();
+    
+    console.log('Found', records.length, 'matching users in database');
+    
+    if (records.length > 0) {
+      user = {
+        id: records[0].id,
+        ...records[0].fields
+      };
+      console.log('User found in database:', { id: user.id, email: user.email, role: user.role, hasPassword: !!user.password_hash });
+    } else {
+      console.log('No user found in database for email:', email);
     }
 
     if (!user) {
@@ -275,13 +284,9 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ message: 'Account not properly configured' });
     }
 
-    // Verify password (skip check for fallback user)
-    let isValidPassword = false;
-    if (user.password_hash === '$2a$12$dummy.hash.for.fallback.auth') {
-      isValidPassword = true;
-    } else {
-      isValidPassword = await bcrypt.compare(password, user.password_hash);
-    }
+    // Verify password - DATABASE ONLY
+    const isValidPassword = await bcrypt.compare(password, user.password_hash);
+    console.log('Password verification result:', isValidPassword);
     
     if (!isValidPassword) {
       return res.status(401).json({ message: 'Invalid credentials' });
@@ -335,16 +340,13 @@ router.post('/login', async (req, res) => {
       { expiresIn: process.env.JWT_REFRESH_EXPIRE || '7d' }
     );
 
-    // Update last login (optional, don't fail if this fails)
+    // Update last login in database
     try {
-      if (user.password_hash !== '$2a$12$dummy.hash.for.fallback.auth') {
-        const Airtable = require('airtable');
-        const base = Airtable.base(process.env.AIRTABLE_BASE_ID);
-        await base('Employees').update([{
-          id: user.id,
-          fields: { last_login: new Date().toISOString() }
-        }]);
-      }
+      await base('Employees').update([{
+        id: user.id,
+        fields: { last_login: new Date().toISOString() }
+      }]);
+      console.log('Updated last login for user:', user.email);
     } catch (updateError) {
       console.warn('Failed to update last login:', updateError.message);
     }
