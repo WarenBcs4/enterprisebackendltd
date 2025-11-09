@@ -286,29 +286,7 @@ router.post('/login', async (req, res) => {
       console.log('No user found in database for email:', email);
     }
 
-    // TEMPORARY: If Airtable fails, use test credentials for development
-    if (!user && process.env.NODE_ENV === 'production') {
-      console.log('Using fallback test user for:', email);
-      const testUsers = {
-        'warenodhiambo2@gmail.com': { role: 'manager', password: 'managerpassword123' },
-        'waren9505@gmail.com': { role: 'admin', password: 'Wa41re87.' },
-        'admin@test.com': { role: 'admin', password: 'adminPassword123!' }
-      };
-      
-      const testUser = testUsers[email];
-      if (testUser && password === testUser.password) {
-        user = {
-          id: 'test-' + email.split('@')[0],
-          email: email,
-          full_name: email.split('@')[0].charAt(0).toUpperCase() + email.split('@')[0].slice(1),
-          role: testUser.role,
-          is_active: true,
-          password_hash: 'test-hash',
-          branch_id: 'test-branch'
-        };
-        console.log('Using test user:', user);
-      }
-    }
+
 
     if (!user) {
       return res.status(401).json({ message: 'Invalid credentials' });
@@ -322,15 +300,9 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ message: 'Account not properly configured' });
     }
 
-    // Verify password - DATABASE ONLY (skip for test users)
-    let isValidPassword = false;
-    if (user.password_hash === 'test-hash') {
-      isValidPassword = true; // Test user already verified above
-      console.log('Test user password verification: true');
-    } else {
-      isValidPassword = await bcrypt.compare(password, user.password_hash);
-      console.log('Database password verification result:', isValidPassword);
-    }
+    // Verify password - DATABASE ONLY
+    const isValidPassword = await bcrypt.compare(password, user.password_hash);
+    console.log('Database password verification result:', isValidPassword);
     
     if (!isValidPassword) {
       return res.status(401).json({ message: 'Invalid credentials' });

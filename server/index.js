@@ -205,6 +205,7 @@ app.use('/api/data', require('./routes/data'));
 app.use('/api/debug', require('./routes/debug'));
 app.use('/api/tables', require('./routes/table-discovery'));
 app.use('/api/airtable', require('./routes/airtable-setup'));
+app.use('/api/test-data', require('./routes/test-data'));
 
 // Error handling middleware
 app.use((err, req, res, next) => {
