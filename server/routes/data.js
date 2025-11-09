@@ -207,7 +207,7 @@ router.get('/page/:pageName', authenticateToken, async (req, res) => {
         // Fetch HR-related data
         const employees = await airtableHelpers.find(TABLES.EMPLOYEES).catch(() => []);
         const payroll = await airtableHelpers.find(TABLES.PAYROLL).catch(() => []);
-        const branches = await airtableHelpers.find(TABLES.BRANCHES).catch(() => []);
+        const hrBranches = await airtableHelpers.find(TABLES.BRANCHES).catch(() => []);
         
         // Clean and format data
         const cleanEmployees = employees.map(emp => ({
@@ -241,7 +241,7 @@ router.get('/page/:pageName', authenticateToken, async (req, res) => {
           generated_by: p.generated_by || 'system'
         }));
         
-        const cleanBranches = branches.map(b => ({
+        const cleanBranches = hrBranches.map(b => ({
           id: b.id,
           branch_name: b.branch_name || '',
           location_address: b.location_address || '',
@@ -308,7 +308,7 @@ router.get('/page/:pageName', authenticateToken, async (req, res) => {
         const sales = await airtableHelpers.find(TABLES.SALES, salesFilter).catch(() => []);
         const saleItems = await airtableHelpers.find(TABLES.SALE_ITEMS).catch(() => []);
         const expenses = await airtableHelpers.find(TABLES.EXPENSES, expensesFilter).catch(() => []);
-        const branches = await airtableHelpers.find(TABLES.BRANCHES).catch(() => []);
+        const salesBranches = await airtableHelpers.find(TABLES.BRANCHES).catch(() => []);
         
         // Clean and format stock data
         const cleanStock = stock.map(item => ({
@@ -333,7 +333,7 @@ router.get('/page/:pageName', authenticateToken, async (req, res) => {
         }));
         
         // Clean branches data
-        const cleanBranches = branches.map(b => ({
+        const cleanSalesBranches = salesBranches.map(b => ({
           id: b.id,
           branch_name: b.branch_name || '',
           location_address: b.location_address || ''
@@ -344,7 +344,7 @@ router.get('/page/:pageName', authenticateToken, async (req, res) => {
           sales: cleanSales,
           saleItems: saleItems || [],
           expenses: expenses || [],
-          branches: cleanBranches,
+          branches: cleanSalesBranches,
           selectedBranchId: filterBranchId
         });
         break;
