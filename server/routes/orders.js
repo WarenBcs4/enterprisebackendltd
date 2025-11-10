@@ -265,6 +265,18 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
       return res.status(400).json({ message: 'Completed items are required' });
     }
 
+    // Get order items to validate
+    const orderItems = await airtableHelpers.find(
+      TABLES.ORDER_ITEMS,
+      `{order_id} = "${orderId}"`
+    );
+
+    if (!orderItems || orderItems.length === 0) {
+      return res.status(400).json({ message: 'No order items found for this order' });
+    }
+
+    console.log('Order items found:', orderItems.length);
+
     // Process each completed item
     for (const item of completedItems) {
       console.log('Processing item:', item);
