@@ -79,12 +79,6 @@ router.post('/branch/:branchId', authenticateToken, async (req, res) => {
     
     const saleItems = [];
     for (const item of items) {
-      // Find the stock item to get product_id
-      const stockItem = allStock.find(s => 
-        s.branch_id && s.branch_id.includes(branchId) && 
-        s.product_name === item.product_name
-      );
-      
       const saleItem = await airtableHelpers.create(TABLES.SALE_ITEMS, {
         sale_id: [sale.id],
         product_name: item.product_name,
@@ -100,7 +94,7 @@ router.post('/branch/:branchId', authenticateToken, async (req, res) => {
     
     // Update stock quantities and create movement records
     for (const item of items) {
-      // Create stock movement record for each item sold
+        // Create stock movement record for each item sold
       if (branchId && branchId !== 'default') {
         const stockItem = allStock.find(s => 
           s.branch_id && s.branch_id.includes(branchId) && 
@@ -193,28 +187,65 @@ router.post('/expenses/branch/:branchId', authenticateToken, auditLog('RECORD_EX
       vehicle_plate_number
     } = req.body;
 
+    console.log('Recording expense:', { branchId, expense_date, category, amount, description, vehicle_plate_number });
+
+    // Validation
     if (!expense_date || !category || !amount) {
       return res.status(400).json({ 
         message: 'Expense date, category, and amount are required' 
       });
     }
 
-    let vehicle_id = null;
+    if (parseFloat(amount) <= 0) {
+      return res.status(400).json({ 
+        message: 'Amount must be greater than 0' 
+      });
+    }
 
-    // If category is vehicle-related, find vehicle by plate number
-    if (category === 'vehicle_related' && vehicle_plate_number) {
-      const vehicles = await airtableHelpers.find(
-        TABLES.VEHICLES,
-        `{plate_number} = "${vehicle_plate_number}"`
-      );
-
-      if (vehicles.length === 0) {
+    // Get branches to validate branchId
+    const allBranches = await airtableHelpers.find(TABLES.BRANCHES);
+    console.log('Available branches:', allBranches.map(b => ({ id: b.id, name: b.branch_name })));
+    
+    let targetBranchId = null;
+    
+    if (branchId && branchId !== 'default') {
+      const branch = allBranches.find(b => b.id === branchId);
+      if (!branch) {
         return res.status(400).json({ 
-          message: 'Vehicle not found with the provided plate number' 
+          message: 'Invalid branch ID provided' 
         });
       }
+      targetBranchId = branchId;
+    } else {
+      // Use first available branch for 'default'
+      if (allBranches.length > 0) {
+        targetBranchId = allBranches[0].id;
+      } else {
+        return res.status(400).json({ 
+          message: 'No branches available to record expense' 
+        });
+      }
+    }
 
-      vehicle_id = vehicles[0].id;
+    let vehicle_id = null;
+
+    // If category is vehicle-related and plate number provided, find vehicle
+    if (category === 'vehicle_related' && vehicle_plate_number) {
+      try {
+        const vehicles = await airtableHelpers.find(
+          TABLES.VEHICLES,
+          `{plate_number} = "${vehicle_plate_number}"`
+        );
+
+        if (vehicles.length === 0) {
+          console.log(`Vehicle with plate ${vehicle_plate_number} not found, continuing without vehicle link`);
+        } else {
+          vehicle_id = vehicles[0].id;
+          console.log(`Found vehicle: ${vehicle_id}`);
+        }
+      } catch (vehicleError) {
+        console.log('Error finding vehicle, continuing without vehicle link:', vehicleError.message);
+      }
     }
 
     // Create expense record with proper Airtable structure
@@ -222,41 +253,53 @@ router.post('/expenses/branch/:branchId', authenticateToken, auditLog('RECORD_EX
       expense_date: expense_date,
       category: category,
       amount: parseFloat(amount),
+      branch_id: [targetBranchId],
       created_at: new Date().toISOString()
     };
     
-    // Add branch_id - use first available branch if 'default'
-    if (branchId && branchId !== 'default') {
-      expenseData.branch_id = [branchId];
-    } else {
-      const allBranches = await airtableHelpers.find(TABLES.BRANCHES);
-      if (allBranches.length > 0) {
-        expenseData.branch_id = [allBranches[0].id];
+    // Add optional fields
+    if (description && description.trim()) {
+      expenseData.description = description.trim();
+    }
+    
+    if (vehicle_plate_number && vehicle_plate_number.trim()) {
+      expenseData.vehicle_plate_number = vehicle_plate_number.trim();
+    }
+    
+    console.log('Creating expense with data:', expenseData);
+    const expense = await airtableHelpers.create(TABLES.EXPENSES, expenseData);
+    console.log('Expense created successfully:', expense.id);
+
+    // If vehicle-related and vehicle found, auto-create maintenance record
+    if (vehicle_id && req.user?.id) {
+      try {
+        await airtableHelpers.create(TABLES.VEHICLE_MAINTENANCE, {
+          vehicle_id: [vehicle_id],
+          maintenance_date: expense_date,
+          maintenance_type: 'expense',
+          cost: parseFloat(amount),
+          description: description || 'Expense recorded from sales',
+          recorded_by: [req.user.id],
+          expense_id: [expense.id]
+        });
+        console.log('Vehicle maintenance record created');
+      } catch (maintenanceError) {
+        console.log('Failed to create maintenance record, but expense was recorded:', maintenanceError.message);
       }
     }
-    
-    if (description) expenseData.description = description;
-    if (vehicle_plate_number) expenseData.vehicle_plate_number = vehicle_plate_number;
-    
-    const expense = await airtableHelpers.create(TABLES.EXPENSES, expenseData);
 
-    // If vehicle-related, auto-create maintenance record
-    if (vehicle_id) {
-      await airtableHelpers.create(TABLES.VEHICLE_MAINTENANCE, {
-        vehicle_id: [vehicle_id],
-        maintenance_date: expense_date,
-        maintenance_type: 'expense',
-        cost: parseFloat(amount),
-        description: description || 'Expense recorded from sales',
-        recorded_by: [req.user.id],
-        expense_id: [expense.id]
-      });
-    }
-
-    res.status(201).json(expense);
+    res.status(201).json({
+      success: true,
+      message: 'Expense recorded successfully',
+      expense: expense
+    });
   } catch (error) {
     console.error('Record expense error:', error);
-    res.status(500).json({ message: 'Failed to record expense' });
+    console.error('Error stack:', error.stack);
+    res.status(500).json({ 
+      message: 'Failed to record expense',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
   }
 });
 
@@ -266,27 +309,41 @@ router.get('/expenses/branch/:branchId', authenticateToken, async (req, res) => 
     const { branchId } = req.params;
     const { startDate, endDate, category } = req.query;
 
-    let filterFormula = `{branch_id} = "${branchId}"`;
+    // Get all expenses and filter manually for better compatibility
+    const allExpenses = await airtableHelpers.find(TABLES.EXPENSES);
     
+    let expenses = allExpenses.filter(expense => 
+      expense.branch_id && expense.branch_id.includes(branchId)
+    );
+    
+    // Filter by date range if provided
     if (startDate && endDate) {
-      filterFormula += ` AND IS_AFTER({expense_date}, "${startDate}") AND IS_BEFORE({expense_date}, "${endDate}")`;
+      expenses = expenses.filter(expense => {
+        if (!expense.expense_date) return false;
+        const expenseDate = new Date(expense.expense_date);
+        return expenseDate >= new Date(startDate) && expenseDate <= new Date(endDate);
+      });
     }
 
+    // Filter by category if provided
     if (category) {
-      filterFormula += ` AND {category} = "${category}"`;
+      expenses = expenses.filter(expense => expense.category === category);
     }
-
-    const expenses = await airtableHelpers.find(TABLES.EXPENSES, filterFormula);
 
     // Get vehicle details for vehicle-related expenses
     const expensesWithDetails = await Promise.all(
       expenses.map(async (expense) => {
         if (expense.vehicle_id) {
-          const vehicle = await airtableHelpers.findById(TABLES.VEHICLES, expense.vehicle_id);
-          expense.vehicle = vehicle ? {
-            plate_number: vehicle.plate_number,
-            vehicle_type: vehicle.vehicle_type
-          } : null;
+          try {
+            const vehicle = await airtableHelpers.findById(TABLES.VEHICLES, expense.vehicle_id);
+            expense.vehicle = vehicle ? {
+              plate_number: vehicle.plate_number,
+              vehicle_type: vehicle.vehicle_type
+            } : null;
+          } catch (vehicleError) {
+            console.log('Error fetching vehicle details:', vehicleError.message);
+            expense.vehicle = null;
+          }
         }
         return expense;
       })

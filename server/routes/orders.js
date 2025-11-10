@@ -33,13 +33,31 @@ router.get('/', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']),
 
     const orders = await airtableHelpers.find(TABLES.ORDERS, filterFormula);
     
-    // Get order items from ORDER_ITEMS table
+    // Get order items from ORDER_ITEMS table with multiple approaches
     const ordersWithItems = await Promise.all(
       orders.map(async (order) => {
-        const items = await airtableHelpers.find(
-          TABLES.ORDER_ITEMS,
-          `{order_id} = "${order.id}"`
-        );
+        let items = [];
+        try {
+          // Try primary approach
+          items = await airtableHelpers.find(
+            TABLES.ORDER_ITEMS,
+            `{order_id} = "${order.id}"`
+          );
+        } catch (error) {
+          console.log(`Failed to find items for order ${order.id} with filter, trying alternative`);
+          try {
+            // Try alternative approach - get all items and filter manually
+            const allItems = await airtableHelpers.find(TABLES.ORDER_ITEMS);
+            items = allItems.filter(item => 
+              item.order_id && (
+                (Array.isArray(item.order_id) && item.order_id.includes(order.id)) ||
+                item.order_id === order.id
+              )
+            );
+          } catch (altError) {
+            console.log(`Alternative approach also failed for order ${order.id}:`, altError.message);
+          }
+        }
         return { ...order, items };
       })
     );
@@ -48,6 +66,37 @@ router.get('/', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']),
   } catch (error) {
     console.error('Get orders error:', error);
     res.status(500).json({ message: 'Failed to fetch orders' });
+  }
+});
+
+// Debug endpoint to check order items
+router.get('/debug/:orderId', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']), async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    
+    // Get order
+    const order = await airtableHelpers.findById(TABLES.ORDERS, orderId);
+    
+    // Get all order items
+    const allOrderItems = await airtableHelpers.find(TABLES.ORDER_ITEMS);
+    
+    // Filter items for this order
+    const orderItems = allOrderItems.filter(item => 
+      item.order_id && (
+        (Array.isArray(item.order_id) && item.order_id.includes(orderId)) ||
+        item.order_id === orderId
+      )
+    );
+    
+    res.json({
+      order,
+      orderItems,
+      totalOrderItems: allOrderItems.length,
+      matchingItems: orderItems.length
+    });
+  } catch (error) {
+    console.error('Debug order error:', error);
+    res.status(500).json({ message: 'Failed to debug order' });
   }
 });
 
@@ -262,74 +311,134 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
     console.log('Completing order:', orderId);
     console.log('Completed items:', completedItems);
 
-    if (!completedItems || completedItems.length === 0) {
-      return res.status(400).json({ message: 'Completed items are required' });
-    }
-
     // Get the order to validate
     const order = await airtableHelpers.findById(TABLES.ORDERS, orderId);
     if (!order) {
       return res.status(404).json({ message: 'Order not found' });
     }
 
-    // Get order items
-    const orderItems = await airtableHelpers.find(
-      TABLES.ORDER_ITEMS,
-      `{order_id} = "${orderId}"`
-    );
+    // Get order items - try multiple approaches
+    let orderItems = [];
+    try {
+      orderItems = await airtableHelpers.find(
+        TABLES.ORDER_ITEMS,
+        `{order_id} = "${orderId}"`
+      );
+    } catch (error) {
+      console.log('Failed to find order items with filter, trying alternative approach');
+      // Try to get all order items and filter manually
+      const allOrderItems = await airtableHelpers.find(TABLES.ORDER_ITEMS);
+      orderItems = allOrderItems.filter(item => 
+        item.order_id && (item.order_id.includes(orderId) || item.order_id === orderId)
+      );
+    }
 
     console.log('Order items found:', orderItems.length);
     
-    if (orderItems.length === 0) {
-      return res.status(400).json({ message: 'No order items found for this order' });
-    }
-
-    // Process each completed item
-    for (const item of completedItems) {
-      console.log('Processing item:', item);
+    // If no order items found but completedItems provided, use completedItems directly
+    if (orderItems.length === 0 && completedItems && completedItems.length > 0) {
+      console.log('No order items found in database, processing provided completed items');
       
-      // Update order item as received
-      await airtableHelpers.update(TABLES.ORDER_ITEMS, item.orderItemId, {
-        quantity_received: item.quantityOrdered
-      });
-      
-      // Add to branch stock if destination specified
-      if (item.branchDestinationId && item.quantityOrdered > 0) {
-        const existingStock = await airtableHelpers.find(TABLES.STOCK);
-        const branchStock = existingStock.filter(s => 
-          s.branch_id && s.branch_id.includes(item.branchDestinationId) && 
-          s.product_name === item.productName
-        );
+      // Process each completed item directly
+      for (const item of completedItems) {
+        console.log('Processing item:', item);
+        
+        // Add to branch stock if destination specified
+        if (item.branchDestinationId && item.quantityOrdered > 0) {
+          const existingStock = await airtableHelpers.find(TABLES.STOCK);
+          const branchStock = existingStock.filter(s => 
+            s.branch_id && s.branch_id.includes(item.branchDestinationId) && 
+            s.product_name === item.productName
+          );
 
-        if (branchStock.length > 0) {
-          // Update existing stock
-          const stockItem = branchStock[0];
-          const newQuantity = stockItem.quantity_available + item.quantityOrdered;
-          await airtableHelpers.update(TABLES.STOCK, stockItem.id, {
-            quantity_available: newQuantity,
-            unit_price: item.purchasePrice
-          });
-        } else {
-          // Create new stock entry
-          await airtableHelpers.create(TABLES.STOCK, {
-            branch_id: [item.branchDestinationId],
-            product_id: item.productId,
+          if (branchStock.length > 0) {
+            // Update existing stock
+            const stockItem = branchStock[0];
+            const newQuantity = stockItem.quantity_available + item.quantityOrdered;
+            await airtableHelpers.update(TABLES.STOCK, stockItem.id, {
+              quantity_available: newQuantity,
+              unit_price: item.purchasePrice
+            });
+          } else {
+            // Create new stock entry
+            await airtableHelpers.create(TABLES.STOCK, {
+              branch_id: [item.branchDestinationId],
+              product_id: item.productId || `PRD_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+              product_name: item.productName,
+              quantity_available: item.quantityOrdered,
+              reorder_level: 10,
+              unit_price: item.purchasePrice
+            });
+          }
+
+          // Create stock movement record
+          await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, {
             product_name: item.productName,
-            quantity_available: item.quantityOrdered,
-            reorder_level: 10,
-            unit_price: item.purchasePrice
+            quantity: item.quantityOrdered,
+            movement_type: 'purchase',
+            movement_date: new Date().toISOString().split('T')[0],
+            reference_id: orderId,
+            to_branch_id: [item.branchDestinationId]
           });
         }
-
-        // Create stock movement record
-        await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, {
-          product_name: item.productName,
-          quantity: item.quantityOrdered,
-          movement_type: 'purchase',
-          movement_date: new Date().toISOString().split('T')[0],
-          reference_id: orderId
-        });
       }
+    } else if (orderItems.length > 0) {
+      // Process existing order items
+      for (const item of completedItems) {
+        console.log('Processing item:', item);
+        
+        // Find matching order item
+        const orderItem = orderItems.find(oi => oi.id === item.orderItemId);
+        if (orderItem) {
+          // Update order item as received
+          await airtableHelpers.update(TABLES.ORDER_ITEMS, item.orderItemId, {
+            quantity_received: item.quantityOrdered
+          });
+        }
+        
+        // Add to branch stock if destination specified
+        if (item.branchDestinationId && item.quantityOrdered > 0) {
+          const existingStock = await airtableHelpers.find(TABLES.STOCK);
+          const branchStock = existingStock.filter(s => 
+            s.branch_id && s.branch_id.includes(item.branchDestinationId) && 
+            s.product_name === item.productName
+          );
+
+          if (branchStock.length > 0) {
+            // Update existing stock
+            const stockItem = branchStock[0];
+            const newQuantity = stockItem.quantity_available + item.quantityOrdered;
+            await airtableHelpers.update(TABLES.STOCK, stockItem.id, {
+              quantity_available: newQuantity,
+              unit_price: item.purchasePrice
+            });
+          } else {
+            // Create new stock entry
+            await airtableHelpers.create(TABLES.STOCK, {
+              branch_id: [item.branchDestinationId],
+              product_id: item.productId || `PRD_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+              product_name: item.productName,
+              quantity_available: item.quantityOrdered,
+              reorder_level: 10,
+              unit_price: item.purchasePrice
+            });
+          }
+
+          // Create stock movement record
+          await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, {
+            product_name: item.productName,
+            quantity: item.quantityOrdered,
+            movement_type: 'purchase',
+            movement_date: new Date().toISOString().split('T')[0],
+            reference_id: orderId,
+            to_branch_id: [item.branchDestinationId]
+          });
+        }
+      }
+    } else {
+      return res.status(400).json({ 
+        message: 'No order items found and no completed items provided. Cannot complete order.' 
+      });
     }
 
     // Mark order as completed
