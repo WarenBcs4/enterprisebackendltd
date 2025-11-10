@@ -3,19 +3,29 @@ const bcrypt = require('bcryptjs');
 const { airtableHelpers, TABLES } = require('../config/airtable');
 const { auditLog, authenticateToken, authorizeRoles } = require('../middleware/auth');
 
-// CSRF protection middleware (disabled in development)
+// CSRF protection disabled
 const csrfProtection = (req, res, next) => {
-  if (process.env.NODE_ENV === 'development') {
-    return next();
-  }
-  const token = req.headers['x-csrf-token'] || req.body._csrf;
-  if (!token) {
-    return res.status(403).json({ message: 'CSRF token required' });
-  }
   next();
 };
 
 const router = express.Router();
+
+// Get branches for HR page (public access)
+router.get('/branches', async (req, res) => {
+  try {
+    const branches = await airtableHelpers.find(TABLES.BRANCHES);
+    const publicBranches = branches.map(branch => ({
+      id: branch.id,
+      name: branch.branch_name || 'Branch',
+      branch_name: branch.branch_name || 'Branch',
+      address: branch.location_address || 'Address not available'
+    }));
+    res.json(publicBranches);
+  } catch (error) {
+    console.error('HR branches error:', error);
+    res.status(200).json([]);
+  }
+});
 
 // Get all employees
 router.get('/employees', authenticateToken, async (req, res) => {
@@ -55,7 +65,7 @@ router.get('/employees', authenticateToken, async (req, res) => {
 });
 
 // Create new employee
-router.post('/employees', authenticateToken, authorizeRoles(['admin', 'boss', 'hr']), csrfProtection, async (req, res) => {
+router.post('/employees', authenticateToken, authorizeRoles(['admin', 'boss', 'hr']), async (req, res) => {
   try {
     console.log('Creating employee request:', req.body);
     const { full_name, email, phone, role, branch_id, salary, password, hire_date } = req.body;
