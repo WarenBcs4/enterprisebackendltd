@@ -229,22 +229,20 @@ router.post('/expenses/branch/:branchId', authenticateToken, auditLog('RECORD_EX
 
     let vehicle_id = null;
 
-    // If category is vehicle-related and plate number provided, find vehicle
-    if (category === 'vehicle_related' && vehicle_plate_number) {
+    // Find vehicle by plate number if provided
+    if (vehicle_plate_number && vehicle_plate_number.trim()) {
       try {
-        const vehicles = await airtableHelpers.find(
-          TABLES.VEHICLES,
-          `{plate_number} = "${vehicle_plate_number}"`
-        );
-
-        if (vehicles.length === 0) {
-          console.log(`Vehicle with plate ${vehicle_plate_number} not found, continuing without vehicle link`);
+        const allVehicles = await airtableHelpers.find(TABLES.VEHICLES);
+        const vehicle = allVehicles.find(v => v.plate_number === vehicle_plate_number.trim());
+        
+        if (vehicle) {
+          vehicle_id = vehicle.id;
+          console.log(`Found vehicle: ${vehicle_id} for plate ${vehicle_plate_number}`);
         } else {
-          vehicle_id = vehicles[0].id;
-          console.log(`Found vehicle: ${vehicle_id}`);
+          console.log(`Vehicle with plate ${vehicle_plate_number} not found`);
         }
       } catch (vehicleError) {
-        console.log('Error finding vehicle, continuing without vehicle link:', vehicleError.message);
+        console.log('Error finding vehicle:', vehicleError.message);
       }
     }
 
@@ -264,6 +262,11 @@ router.post('/expenses/branch/:branchId', authenticateToken, auditLog('RECORD_EX
     
     if (vehicle_plate_number && vehicle_plate_number.trim()) {
       expenseData.vehicle_plate_number = vehicle_plate_number.trim();
+    }
+    
+    // Link to vehicle if found
+    if (vehicle_id) {
+      expenseData.vehicle_id = [vehicle_id];
     }
     
     console.log('Creating expense with data:', expenseData);
@@ -330,12 +333,12 @@ router.get('/expenses/branch/:branchId', authenticateToken, async (req, res) => 
       expenses = expenses.filter(expense => expense.category === category);
     }
 
-    // Get vehicle details for vehicle-related expenses
+    // Get vehicle details for expenses with vehicle links
     const expensesWithDetails = await Promise.all(
       expenses.map(async (expense) => {
-        if (expense.vehicle_id) {
+        if (expense.vehicle_id && Array.isArray(expense.vehicle_id) && expense.vehicle_id.length > 0) {
           try {
-            const vehicle = await airtableHelpers.findById(TABLES.VEHICLES, expense.vehicle_id);
+            const vehicle = await airtableHelpers.findById(TABLES.VEHICLES, expense.vehicle_id[0]);
             expense.vehicle = vehicle ? {
               plate_number: vehicle.plate_number,
               vehicle_type: vehicle.vehicle_type
