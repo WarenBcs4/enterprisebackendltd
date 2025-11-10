@@ -34,10 +34,16 @@ router.get('/', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']),
     const orders = await airtableHelpers.find(TABLES.ORDERS, filterFormula);
     
     // Parse items from JSON
-    const ordersWithItems = orders.map(order => ({
-      ...order,
-      items: order.items ? JSON.parse(order.items) : []
-    }));
+    const ordersWithItems = orders.map(order => {
+      let items = [];
+      try {
+        items = order.items ? JSON.parse(order.items) : [];
+      } catch (e) {
+        console.log('Error parsing items for order:', order.id);
+        items = [];
+      }
+      return { ...order, items };
+    });
 
     res.json(ordersWithItems);
   } catch (error) {
