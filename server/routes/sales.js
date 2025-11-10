@@ -89,23 +89,21 @@ router.post('/branch/:branchId', authenticateToken, async (req, res) => {
     // Update stock quantities and create movement records
     for (const item of items) {
       // Create stock movement record for each item sold
-      const movementData = {
-        product_id: item.product_id,
-        product_name: item.product_name,
-        quantity: parseInt(item.quantity),
-        movement_type: 'sale',
-        reason: 'Product sold',
-        sale_id: [sale.id],
-        created_by: [req.user.id],
-        created_at: new Date().toISOString(),
-        status: 'completed'
-      };
+      const stockItem = allStock.find(s => 
+        s.branch_id && s.branch_id.includes(branchId) && 
+        s.product_name === item.product_name
+      );
       
-      if (branchId && branchId !== 'default') {
-        movementData.from_branch_id = [branchId];
+      if (stockItem) {
+        await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, {
+          from_branch_id: [branchId],
+          product_name: item.product_name,
+          quantity: Number(item.quantity),
+          movement_type: 'sale',
+          movement_date: new Date().toISOString().split('T')[0],
+          reference_id: sale.id
+        });
       }
-      
-      await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, movementData);
       
       if (branchId && branchId !== 'default') {
         const stockItems = allStock.filter(s => 

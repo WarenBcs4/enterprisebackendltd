@@ -33,16 +33,11 @@ router.get('/', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']),
 
     const orders = await airtableHelpers.find(TABLES.ORDERS, filterFormula);
     
-    // Get order items for each order
-    const ordersWithItems = await Promise.all(
-      orders.map(async (order) => {
-        const items = await airtableHelpers.find(
-          TABLES.ORDER_ITEMS,
-          `{order_id} = "${order.id}"`
-        );
-        return { ...order, items };
-      })
-    );
+    // Parse items from JSON
+    const ordersWithItems = orders.map(order => ({
+      ...order,
+      items: order.items ? JSON.parse(order.items) : []
+    }));
 
     res.json(ordersWithItems);
   } catch (error) {
@@ -95,18 +90,18 @@ router.post('/', authenticateToken, authorizeRoles(['admin', 'manager', 'boss'])
     
     const order = await airtableHelpers.create(TABLES.ORDERS, orderData);
 
-    // Create order items
-    const orderItems = [];
-    for (const item of items) {
-      const orderItem = await airtableHelpers.create(TABLES.ORDER_ITEMS, {
-        order_id: [order.id],
-        product_name: item.product_name,
-        quantity_ordered: Number(item.quantity_ordered),
-        purchase_price_per_unit: Number(item.purchase_price_per_unit),
-        quantity_received: 0
-      });
-      orderItems.push(orderItem);
-    }
+    // Store items as JSON in order record
+    const orderItems = items.map(item => ({
+      product_name: item.product_name,
+      quantity_ordered: Number(item.quantity_ordered),
+      purchase_price_per_unit: Number(item.purchase_price_per_unit),
+      branch_destination_id: item.branch_destination_id
+    }));
+    
+    // Update order with items
+    await airtableHelpers.update(TABLES.ORDERS, order.id, {
+      items: JSON.stringify(orderItems)
+    });
 
     res.status(201).json({
       message: 'Order created successfully',
@@ -265,27 +260,16 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
       return res.status(400).json({ message: 'Completed items are required' });
     }
 
-    // Get order items to validate
-    const orderItems = await airtableHelpers.find(
-      TABLES.ORDER_ITEMS,
-      `{order_id} = "${orderId}"`
-    );
-
-    if (!orderItems || orderItems.length === 0) {
-      return res.status(400).json({ message: 'No order items found for this order' });
+    // Get the order to validate
+    const order = await airtableHelpers.findById(TABLES.ORDERS, orderId);
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
     }
-
-    console.log('Order items found:', orderItems.length);
 
     // Process each completed item
     for (const item of completedItems) {
       console.log('Processing item:', item);
       
-      // Update order item as fully received
-      await airtableHelpers.update(TABLES.ORDER_ITEMS, item.orderItemId, {
-        quantity_received: item.quantityOrdered
-      });
-
       // Add to branch stock if destination specified
       if (item.branchDestinationId && item.quantityOrdered > 0) {
         // Check if product already exists in branch stock
@@ -314,6 +298,16 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
             unit_price: item.purchasePrice
           });
         }
+
+        // Create stock movement record
+        await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, {
+          to_branch_id: [item.branchDestinationId],
+          product_name: item.productName,
+          quantity: item.quantityOrdered,
+          movement_type: 'purchase',
+          movement_date: new Date().toISOString().split('T')[0],
+          reference_id: orderId
+        });
       }
     }
 
