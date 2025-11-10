@@ -65,14 +65,15 @@ router.post('/employees', authenticateToken, authorizeRoles(['admin', 'boss', 'h
       return res.status(400).json({ message: 'Full name, email, and role are required' });
     }
 
-    // Check if email already exists
+    // Check if email already exists (case insensitive)
+    const normalizedEmail = email.toLowerCase().trim();
     const existingEmployees = await airtableHelpers.find(
       TABLES.EMPLOYEES,
-      `{email} = "${email}"`
+      `LOWER({email}) = "${normalizedEmail}"`
     );
     
     if (existingEmployees.length > 0) {
-      return res.status(400).json({ message: 'Email already exists' });
+      return res.status(400).json({ message: 'Email already exists in the system' });
     }
 
     // Use provided password or generate default
@@ -81,7 +82,7 @@ router.post('/employees', authenticateToken, authorizeRoles(['admin', 'boss', 'h
     
     const employeeData = {
       full_name: full_name.trim(),
-      email: email.toLowerCase().trim(),
+      email: normalizedEmail,
       role,
       password_hash: hashedPassword,
       is_active: true,
