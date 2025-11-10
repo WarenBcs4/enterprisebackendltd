@@ -1,6 +1,6 @@
 const express = require('express');
 const { airtableHelpers, TABLES } = require('../config/airtable');
-const { authorizeRoles, auditLog } = require('../middleware/auth');
+const { authenticateToken, authorizeRoles, auditLog } = require('../middleware/auth');
 
 // CSRF protection middleware (disabled in development)
 const csrfProtection = (req, res, next) => {
@@ -17,7 +17,7 @@ const csrfProtection = (req, res, next) => {
 const router = express.Router();
 
 // Get all orders
-router.get('/', authorizeRoles(['admin', 'manager', 'boss']), async (req, res) => {
+router.get('/', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']), async (req, res) => {
   try {
     const { status, startDate, endDate } = req.query;
     
@@ -52,7 +52,7 @@ router.get('/', authorizeRoles(['admin', 'manager', 'boss']), async (req, res) =
 });
 
 // Create new order
-router.post('/', authorizeRoles(['admin', 'manager', 'boss']), auditLog('CREATE_ORDER'), async (req, res) => {
+router.post('/', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']), auditLog('CREATE_ORDER'), async (req, res) => {
   try {
     const {
       supplier_name,
@@ -63,6 +63,20 @@ router.post('/', authorizeRoles(['admin', 'manager', 'boss']), auditLog('CREATE_
 
     if (!supplier_name || !order_date || !items || items.length === 0) {
       return res.status(400).json({ message: 'Supplier name, order date, and items are required' });
+    }
+
+    // Validate items
+    for (const item of items) {
+      if (!item.product_name || !item.quantity_ordered || !item.purchase_price_per_unit) {
+        return res.status(400).json({ 
+          message: 'Each item must have product name, quantity, and purchase price' 
+        });
+      }
+      if (item.quantity_ordered <= 0 || item.purchase_price_per_unit <= 0) {
+        return res.status(400).json({ 
+          message: 'Quantity and purchase price must be greater than 0' 
+        });
+      }
     }
 
     // Calculate total amount
@@ -78,35 +92,42 @@ router.post('/', authorizeRoles(['admin', 'manager', 'boss']), auditLog('CREATE_
       total_amount: totalAmount,
       amount_paid: 0,
       balance_remaining: totalAmount,
-      status: 'ordered'
+      status: 'ordered',
+      created_by: [req.user.id],
+      created_at: new Date().toISOString()
     });
 
     // Create order items
     const orderItems = await Promise.all(
       items.map(item => 
         airtableHelpers.create(TABLES.ORDER_ITEMS, {
-          order_id: [order.id], // Array format for linked record
-          product_name: item.product_name,
-          quantity_ordered: item.quantity_ordered,
-          purchase_price_per_unit: item.purchase_price_per_unit,
+          order_id: [order.id],
+          product_name: item.product_name.trim(),
+          quantity_ordered: parseInt(item.quantity_ordered),
+          purchase_price_per_unit: parseFloat(item.purchase_price_per_unit),
           quantity_received: 0,
-          branch_destination_id: item.branch_destination_id ? [item.branch_destination_id] : null
+          branch_destination_id: item.branch_destination_id ? [item.branch_destination_id] : null,
+          created_at: new Date().toISOString()
         })
       )
     );
 
     res.status(201).json({
-      order: order,
-      items: orderItems
+      message: 'Order created successfully',
+      order: { ...order, items: orderItems }
     });
   } catch (error) {
     console.error('Create order error:', error);
-    res.status(500).json({ message: 'Failed to create order' });
+    console.error('Error details:', error.message);
+    res.status(500).json({ 
+      message: 'Failed to create order', 
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
   }
 });
 
 // Record payment for order
-router.post('/:orderId/payment', authorizeRoles(['admin', 'manager', 'boss']), auditLog('RECORD_PAYMENT'), async (req, res) => {
+router.post('/:orderId/payment', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']), auditLog('RECORD_PAYMENT'), async (req, res) => {
   try {
     const { orderId } = req.params;
     const { amount } = req.body;
@@ -144,7 +165,7 @@ router.post('/:orderId/payment', authorizeRoles(['admin', 'manager', 'boss']), a
 });
 
 // Mark items as delivered
-router.post('/:orderId/delivery', authorizeRoles(['admin', 'manager', 'boss']), auditLog('MARK_DELIVERED'), async (req, res) => {
+router.post('/:orderId/delivery', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']), auditLog('MARK_DELIVERED'), async (req, res) => {
   try {
     const { orderId } = req.params;
     const { deliveredItems } = req.body;
@@ -235,8 +256,88 @@ router.post('/:orderId/delivery', authorizeRoles(['admin', 'manager', 'boss']), 
   }
 });
 
+// Mark order as complete and add all items to stock
+router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']), auditLog('COMPLETE_ORDER'), async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { completedItems } = req.body;
+
+    if (!completedItems || completedItems.length === 0) {
+      return res.status(400).json({ message: 'Completed items are required' });
+    }
+
+    // Process each completed item
+    await Promise.all(
+      completedItems.map(async (item) => {
+        // Update order item as fully received
+        await airtableHelpers.update(TABLES.ORDER_ITEMS, item.orderItemId, {
+          quantity_received: item.quantityOrdered
+        });
+
+        // Add to branch stock if destination specified
+        if (item.branchDestinationId && item.quantityOrdered > 0) {
+          // Check if product already exists in branch stock
+          const existingStock = await airtableHelpers.find(
+            TABLES.STOCK,
+            `AND({branch_id} = "${item.branchDestinationId}", {product_name} = "${item.productName}")`
+          );
+
+          if (existingStock.length > 0) {
+            // Update existing stock
+            const newQuantity = existingStock[0].quantity_available + item.quantityOrdered;
+            await airtableHelpers.update(TABLES.STOCK, existingStock[0].id, {
+              quantity_available: newQuantity,
+              unit_price: item.purchasePrice,
+              last_updated: new Date().toISOString(),
+              updated_by: [req.user.id]
+            });
+          } else {
+            // Create new stock entry
+            await airtableHelpers.create(TABLES.STOCK, {
+              branch_id: [item.branchDestinationId],
+              product_id: `PRD_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+              product_name: item.productName,
+              quantity_available: item.quantityOrdered,
+              reorder_level: 10,
+              unit_price: item.purchasePrice,
+              last_updated: new Date().toISOString(),
+              created_at: new Date().toISOString()
+            });
+          }
+
+          // Log stock movement
+          await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, {
+            to_branch_id: [item.branchDestinationId],
+            product_id: item.productId || `PRD_${Date.now()}`,
+            product_name: item.productName,
+            quantity: item.quantityOrdered,
+            movement_type: 'purchase',
+            reason: 'Stock added from completed order',
+            order_id: [orderId],
+            status: 'completed',
+            created_by: [req.user.id],
+            created_at: new Date().toISOString(),
+            movement_date: new Date().toISOString().split('T')[0]
+          });
+        }
+      })
+    );
+
+    // Mark order as completed
+    await airtableHelpers.update(TABLES.ORDERS, orderId, {
+      status: 'completed',
+      completed_at: new Date().toISOString()
+    });
+
+    res.json({ message: 'Order completed successfully and stock added to branches' });
+  } catch (error) {
+    console.error('Complete order error:', error);
+    res.status(500).json({ message: 'Failed to complete order' });
+  }
+});
+
 // Update order
-router.put('/:orderId', authorizeRoles(['admin', 'manager', 'boss']), auditLog('UPDATE_ORDER'), async (req, res) => {
+router.put('/:orderId', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']), auditLog('UPDATE_ORDER'), async (req, res) => {
   try {
     const { orderId } = req.params;
     const { supplier_name, expected_delivery_date, status } = req.body;
@@ -245,6 +346,7 @@ router.put('/:orderId', authorizeRoles(['admin', 'manager', 'boss']), auditLog('
     if (supplier_name) updateData.supplier_name = supplier_name;
     if (expected_delivery_date) updateData.expected_delivery_date = expected_delivery_date;
     if (status) updateData.status = status;
+    updateData.updated_at = new Date().toISOString();
 
     const updatedOrder = await airtableHelpers.update(TABLES.ORDERS, orderId, updateData);
 
@@ -256,7 +358,7 @@ router.put('/:orderId', authorizeRoles(['admin', 'manager', 'boss']), auditLog('
 });
 
 // Delete order
-router.delete('/:orderId', authorizeRoles(['admin', 'manager', 'boss']), auditLog('DELETE_ORDER'), async (req, res) => {
+router.delete('/:orderId', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']), auditLog('DELETE_ORDER'), async (req, res) => {
   try {
     const { orderId } = req.params;
 
