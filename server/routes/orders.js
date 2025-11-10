@@ -272,6 +272,18 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
       return res.status(404).json({ message: 'Order not found' });
     }
 
+    // Get order items
+    const orderItems = await airtableHelpers.find(
+      TABLES.ORDER_ITEMS,
+      `{order_id} = "${orderId}"`
+    );
+
+    console.log('Order items found:', orderItems.length);
+    
+    if (orderItems.length === 0) {
+      return res.status(400).json({ message: 'No order items found for this order' });
+    }
+
     // Process each completed item
     for (const item of completedItems) {
       console.log('Processing item:', item);
