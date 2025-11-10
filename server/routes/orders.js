@@ -258,74 +258,62 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
     const { orderId } = req.params;
     const { completedItems } = req.body;
 
+    console.log('Completing order:', orderId);
+    console.log('Completed items:', completedItems);
+
     if (!completedItems || completedItems.length === 0) {
       return res.status(400).json({ message: 'Completed items are required' });
     }
 
     // Process each completed item
-    await Promise.all(
-      completedItems.map(async (item) => {
-        // Update order item as fully received
-        await airtableHelpers.update(TABLES.ORDER_ITEMS, item.orderItemId, {
-          quantity_received: item.quantityOrdered
-        });
+    for (const item of completedItems) {
+      console.log('Processing item:', item);
+      
+      // Update order item as fully received
+      await airtableHelpers.update(TABLES.ORDER_ITEMS, item.orderItemId, {
+        quantity_received: item.quantityOrdered
+      });
 
-        // Add to branch stock if destination specified
-        if (item.branchDestinationId && item.quantityOrdered > 0) {
-          // Check if product already exists in branch stock
-          const existingStock = await airtableHelpers.find(
-            TABLES.STOCK,
-            `AND({branch_id} = "${item.branchDestinationId}", {product_name} = "${item.productName}")`
-          );
+      // Add to branch stock if destination specified
+      if (item.branchDestinationId && item.quantityOrdered > 0) {
+        // Check if product already exists in branch stock
+        const existingStock = await airtableHelpers.find(TABLES.STOCK);
+        const branchStock = existingStock.filter(s => 
+          s.branch_id && s.branch_id.includes(item.branchDestinationId) && 
+          s.product_name === item.productName
+        );
 
-          if (existingStock.length > 0) {
-            // Update existing stock
-            const newQuantity = existingStock[0].quantity_available + item.quantityOrdered;
-            await airtableHelpers.update(TABLES.STOCK, existingStock[0].id, {
-              quantity_available: newQuantity,
-              unit_price: item.purchasePrice,
-              last_updated: new Date().toISOString(),
-              updated_by: [req.user.id]
-            });
-          } else {
-            // Create new stock entry
-            await airtableHelpers.create(TABLES.STOCK, {
-              branch_id: [item.branchDestinationId],
-              product_id: `PRD_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-              product_name: item.productName,
-              quantity_available: item.quantityOrdered,
-              reorder_level: 10,
-              unit_price: item.purchasePrice,
-              last_updated: new Date().toISOString(),
-              created_at: new Date().toISOString()
-            });
-          }
-
-          // Log stock movement
-          await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, {
-            to_branch_id: [item.branchDestinationId],
-            product_id: item.productId || `PRD_${Date.now()}`,
+        if (branchStock.length > 0) {
+          // Update existing stock
+          const stockItem = branchStock[0];
+          const newQuantity = stockItem.quantity_available + item.quantityOrdered;
+          await airtableHelpers.update(TABLES.STOCK, stockItem.id, {
+            quantity_available: newQuantity,
+            unit_price: item.purchasePrice
+          });
+        } else {
+          // Create new stock entry
+          await airtableHelpers.create(TABLES.STOCK, {
+            branch_id: [item.branchDestinationId],
+            product_id: item.productId,
             product_name: item.productName,
-            quantity: item.quantityOrdered,
-            movement_type: 'purchase',
-            reason: 'Stock added from completed order',
-            order_id: [orderId],
-            status: 'completed',
-            created_by: [req.user.id],
-            created_at: new Date().toISOString(),
-            movement_date: new Date().toISOString().split('T')[0]
+            quantity_available: item.quantityOrdered,
+            reorder_level: 10,
+            unit_price: item.purchasePrice
           });
         }
-      })
-    );
+      }
+    }
 
     // Mark order as completed
     await airtableHelpers.update(TABLES.ORDERS, orderId, {
-      status: 'completed',
-      completed_at: new Date().toISOString()
+      status: 'completed'
     });
 
-    res.json({ message: 'Order completed successfully and stock added to branches' });
+    res.json({ 
+      success: true,
+      message: 'Order completed successfully and stock added to branches' 
+    });
   } catch (error) {
     console.error('Complete order error:', error);
     res.status(500).json({ message: 'Failed to complete order' });
