@@ -33,13 +33,17 @@ router.get('/', authenticateToken, authorizeRoles(['admin', 'manager', 'boss']),
 
     const orders = await airtableHelpers.find(TABLES.ORDERS, filterFormula);
     
-    // Parse items from JSON
+    // Parse items from JSON or create empty array
     const ordersWithItems = orders.map(order => {
       let items = [];
       try {
-        items = order.items ? JSON.parse(order.items) : [];
+        if (order.items && typeof order.items === 'string') {
+          items = JSON.parse(order.items);
+        } else if (Array.isArray(order.items)) {
+          items = order.items;
+        }
       } catch (e) {
-        console.log('Error parsing items for order:', order.id);
+        console.log('Error parsing items for order:', order.id, e.message);
         items = [];
       }
       return { ...order, items };
@@ -307,7 +311,6 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
 
         // Create stock movement record
         await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, {
-          to_branch_id: [item.branchDestinationId],
           product_name: item.productName,
           quantity: item.quantityOrdered,
           movement_type: 'purchase',

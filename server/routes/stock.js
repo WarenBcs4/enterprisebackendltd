@@ -96,12 +96,13 @@ router.post('/branch/:branchId', authenticateToken, async (req, res) => {
 
     const stockData = {
       branch_id: [branchId], // Link field requires array
-      product_id: product_id || `PRD_${Date.now()}`,
+      product_id: product_id || `PRD_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
       product_name,
       quantity_available: parseInt(quantity_available),
       unit_price: parseFloat(unit_price),
       reorder_level: parseInt(reorder_level) || 10,
-      last_updated: new Date().toISOString()
+      last_updated: new Date().toISOString(),
+      created_at: new Date().toISOString()
     };
 
     const newStock = await airtableHelpers.create(TABLES.STOCK, stockData);

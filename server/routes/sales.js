@@ -67,12 +67,24 @@ router.post('/branch/:branchId', authenticateToken, async (req, res) => {
     
     if (branchId && branchId !== 'default') {
       saleData.branch_id = [branchId];
+    } else {
+      // Get first available branch for 'default'
+      const allBranches = await airtableHelpers.find(TABLES.BRANCHES);
+      if (allBranches.length > 0) {
+        saleData.branch_id = [allBranches[0].id];
+      }
     }
 
     const sale = await airtableHelpers.create(TABLES.SALES, saleData);
     
     const saleItems = [];
     for (const item of items) {
+      // Find the stock item to get product_id
+      const stockItem = allStock.find(s => 
+        s.branch_id && s.branch_id.includes(branchId) && 
+        s.product_name === item.product_name
+      );
+      
       const saleItem = await airtableHelpers.create(TABLES.SALE_ITEMS, {
         sale_id: [sale.id],
         product_name: item.product_name,
@@ -89,20 +101,21 @@ router.post('/branch/:branchId', authenticateToken, async (req, res) => {
     // Update stock quantities and create movement records
     for (const item of items) {
       // Create stock movement record for each item sold
-      const stockItem = allStock.find(s => 
-        s.branch_id && s.branch_id.includes(branchId) && 
-        s.product_name === item.product_name
-      );
-      
-      if (stockItem) {
-        await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, {
-          from_branch_id: [branchId],
-          product_name: item.product_name,
-          quantity: Number(item.quantity),
-          movement_type: 'sale',
-          movement_date: new Date().toISOString().split('T')[0],
-          reference_id: sale.id
-        });
+      if (branchId && branchId !== 'default') {
+        const stockItem = allStock.find(s => 
+          s.branch_id && s.branch_id.includes(branchId) && 
+          s.product_name === item.product_name
+        );
+        
+        if (stockItem) {
+          await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, {
+            product_name: item.product_name,
+            quantity: Number(item.quantity),
+            movement_type: 'sale',
+            movement_date: new Date().toISOString().split('T')[0],
+            reference_id: sale.id
+          });
+        }
       }
       
       if (branchId && branchId !== 'default') {
