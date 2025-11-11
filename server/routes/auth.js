@@ -161,7 +161,13 @@ const validatePassword = (password) => {
 };
 
 // Register admin (first-time setup) - ALWAYS ALLOW FOR SETUP
-router.post('/register', async (req, res) => {
+const { validateAndSanitize, commonValidations } = require('../middleware/validation');
+
+router.post('/register', validateAndSanitize([
+  commonValidations.name,
+  commonValidations.email,
+  commonValidations.password
+]), async (req, res) => {
   try {
     const { full_name, email, password, role } = req.body;
 
@@ -226,7 +232,10 @@ router.post('/register', async (req, res) => {
 });
 
 // Login endpoint
-router.post('/login', async (req, res) => {
+router.post('/login', validateAndSanitize([
+  commonValidations.email,
+  body('password').notEmpty().withMessage('Password is required')
+]), async (req, res) => {
   try {
     const { email, password } = req.body;
     
@@ -253,7 +262,7 @@ router.post('/login', async (req, res) => {
     console.log('Airtable config check passed, attempting login...');
     console.log('Login credentials check:', { email, hasPassword: !!password });
 
-    // Find user in Airtable - NO FALLBACK, DATABASE ONLY
+    // Find user in Airtable - DATABASE ONLY
     let user;
     let records = [];
     
@@ -271,7 +280,7 @@ router.post('/login', async (req, res) => {
       }).all();
     } catch (airtableError) {
       console.error('Airtable connection failed:', airtableError.message);
-      console.log('Will try fallback authentication...');
+      return res.status(500).json({ message: 'Database connection failed' });
     }
     
     console.log('Found', records.length, 'matching users in database');

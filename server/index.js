@@ -43,24 +43,47 @@ if (missingVars.length > 0) {
 
 // Security middleware
 app.use(helmet({
-  contentSecurityPolicy: false,
-  crossOriginEmbedderPolicy: false
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      scriptSrc: ["'self'"],
+      imgSrc: ["'self'", "data:", "https:"],
+      connectSrc: ["'self'", "https://api.airtable.com"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com"]
+    }
+  },
+  crossOriginEmbedderPolicy: false,
+  hsts: {
+    maxAge: 31536000,
+    includeSubDomains: true,
+    preload: true
+  }
 }));
+
+// CSRF protection
+const { csrfProtection, getCSRFToken } = require('./middleware/csrf');
+app.get('/api/csrf-token', getCSRFToken);
 
 app.use(compression());
 app.use(cookieParser());
 
-// Rate limiting (disabled for Vercel serverless)
-if (process.env.NODE_ENV !== 'production') {
-  const limiter = rateLimit({
-    windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
-    max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
-    message: 'Too many requests from this IP, please try again later.',
-    standardHeaders: true,
-    legacyHeaders: false,
-  });
-  app.use(limiter);
-}
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || (process.env.NODE_ENV === 'production' ? 100 : 1000),
+  message: {
+    error: 'Too many requests from this IP, please try again later.',
+    retryAfter: Math.ceil((parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000) / 1000)
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => {
+    // Skip rate limiting for health checks
+    return req.path === '/' || req.path === '/api/test';
+  }
+});
+app.use('/api', limiter);
 
 // CORS configuration
 // CORS configuration
@@ -123,7 +146,11 @@ app.get('/api/test', (req, res) => {
   res.json({ 
     message: 'API is working',
     timestamp: new Date().toISOString(),
-    status: 'success'
+    status: 'success',
+    security: {
+      csrf_enabled: process.env.NODE_ENV === 'production',
+      headers_enabled: true
+    }
   });
 });
 
@@ -181,6 +208,12 @@ app.get('/api/test', (req, res) => {
     timestamp: new Date().toISOString(),
     status: 'success'
   });
+});
+
+// Apply CSRF protection to state-changing routes
+const protectedRoutes = ['/api/sales', '/api/stock', '/api/orders', '/api/hr', '/api/admin'];
+protectedRoutes.forEach(route => {
+  app.use(route, csrfProtection);
 });
 
 // Routes
