@@ -64,18 +64,15 @@ router.get('/employees', authenticateToken, async (req, res) => {
   }
 });
 
-// Create new employee
+// Create new employee with admin password setting
 router.post('/employees', authenticateToken, authorizeRoles(['admin', 'boss', 'hr']), async (req, res) => {
   try {
-    console.log('Creating employee request:', req.body);
     const { full_name, email, phone, role, branch_id, salary, password, hire_date } = req.body;
     
-    // Validate required fields
     if (!full_name || !email || !role) {
       return res.status(400).json({ message: 'Full name, email, and role are required' });
     }
 
-    // Check if email already exists (case insensitive)
     const normalizedEmail = email.toLowerCase().trim();
     const existingEmployees = await airtableHelpers.find(
       TABLES.EMPLOYEES,
@@ -86,8 +83,16 @@ router.post('/employees', authenticateToken, authorizeRoles(['admin', 'boss', 'h
       return res.status(400).json({ message: 'Email already exists in the system' });
     }
 
-    // Use provided password or generate default
-    const finalPassword = password || `${role}${process.env.DEFAULT_PASSWORD_SUFFIX || 'pass123'}`;
+    // Admin can set custom password or system generates secure one
+    let finalPassword;
+    if (password && password.trim()) {
+      finalPassword = password.trim();
+    } else {
+      // Generate secure random password
+      const crypto = require('crypto');
+      finalPassword = crypto.randomBytes(8).toString('hex') + '!A1';
+    }
+    
     const hashedPassword = await bcrypt.hash(finalPassword, 12);
     
     const employeeData = {
@@ -97,43 +102,31 @@ router.post('/employees', authenticateToken, authorizeRoles(['admin', 'boss', 'h
       password_hash: hashedPassword,
       is_active: true,
       hire_date: hire_date || new Date().toISOString().split('T')[0],
-      mfa_enabled: false
+      mfa_enabled: false,
+      password_set_by_admin: !!password,
+      temp_password: !password // Flag if password needs to be changed on first login
     };
     
-    // Add optional fields
     if (phone && phone.trim()) employeeData.phone = phone.trim();
     if (branch_id && branch_id !== '' && branch_id !== null) {
-      // Verify branch exists before linking
       try {
         const branch = await airtableHelpers.findById(TABLES.BRANCHES, branch_id);
-        if (branch) {
-          employeeData.branch_id = [branch_id]; // Airtable link field format
-        }
+        if (branch) employeeData.branch_id = [branch_id];
       } catch (branchError) {
         console.log('Branch not found, skipping branch assignment:', branch_id);
       }
     }
     if (salary && salary !== '' && salary !== null && !isNaN(salary)) {
-      employeeData.salary = parseFloat(salary).toString(); // Airtable expects string for currency field
+      employeeData.salary = parseFloat(salary).toString();
     }
     
-    // Add special handling for logistics/driver role
     if (role === 'logistics') {
-      employeeData.driver_license = 'pending'; // Can be updated later
+      employeeData.driver_license = 'pending';
       employeeData.vehicle_assigned = false;
     }
     
-    console.log('Creating employee with data:', JSON.stringify(employeeData, null, 2));
-    
-    // Validate required fields before creation
-    if (!employeeData.full_name || !employeeData.email || !employeeData.role) {
-      throw new Error('Missing required fields: full_name, email, or role');
-    }
-    
     const employee = await airtableHelpers.create(TABLES.EMPLOYEES, employeeData);
-    console.log('Employee created successfully:', employee.id);
 
-    // Return clean response
     res.status(201).json({
       id: employee.id,
       full_name: employee.fields.full_name,
@@ -144,14 +137,10 @@ router.post('/employees', authenticateToken, authorizeRoles(['admin', 'boss', 'h
       hire_date: employee.fields.hire_date,
       salary: employee.fields.salary || null,
       phone: employee.fields.phone || null,
-      driver_license: employee.fields.driver_license || null,
-      vehicle_assigned: employee.fields.vehicle_assigned || false
+      temp_password: !password ? finalPassword : undefined // Return temp password if generated
     });
   } catch (error) {
-    console.error('Create employee error:', {
-      message: error.message,
-      stack: error.stack
-    });
+    console.error('Create employee error:', error);
     res.status(500).json({ 
       message: 'Failed to create employee', 
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
@@ -159,14 +148,11 @@ router.post('/employees', authenticateToken, authorizeRoles(['admin', 'boss', 'h
   }
 });
 
-// Update employee
+// Update employee with password management
 router.put('/employees/:employeeId', authenticateToken, authorizeRoles(['admin', 'boss', 'hr']), async (req, res) => {
   try {
-    console.log('Updating employee:', req.params.employeeId);
-    console.log('Update data:', req.body);
-    
     const { employeeId } = req.params;
-    const { full_name, email, phone, role, branch_id, salary, is_active, hire_date } = req.body;
+    const { full_name, email, phone, role, branch_id, salary, is_active, hire_date, new_password } = req.body;
 
     const employee = await airtableHelpers.findById(TABLES.EMPLOYEES, employeeId);
     if (!employee) {
@@ -179,25 +165,30 @@ router.put('/employees/:employeeId', authenticateToken, authorizeRoles(['admin',
     if (phone !== undefined) updateData.phone = phone ? phone.trim() : null;
     if (role) updateData.role = role;
     if (branch_id !== undefined && branch_id !== null && branch_id !== '') {
-      // Verify branch exists before linking
       try {
         const branch = await airtableHelpers.findById(TABLES.BRANCHES, branch_id);
-        if (branch) {
-          updateData.branch_id = [branch_id]; // Airtable link field format
-        }
+        if (branch) updateData.branch_id = [branch_id];
       } catch (branchError) {
         console.log('Branch not found, skipping branch update:', branch_id);
       }
     } else if (branch_id === null || branch_id === '') {
-      updateData.branch_id = null; // Clear branch assignment
+      updateData.branch_id = null;
     }
     if (salary !== undefined && salary !== null && salary !== '') {
-      updateData.salary = salary.toString(); // Airtable expects string for currency field
+      updateData.salary = salary.toString();
     }
     if (is_active !== undefined) updateData.is_active = is_active;
     if (hire_date !== undefined) updateData.hire_date = hire_date;
 
-    console.log('Final update data:', updateData);
+    // Admin password change
+    if (new_password && new_password.trim() && ['admin', 'boss'].includes(req.user.role)) {
+      const hashedPassword = await bcrypt.hash(new_password.trim(), 12);
+      updateData.password_hash = hashedPassword;
+      updateData.password_changed_at = new Date().toISOString();
+      updateData.password_set_by_admin = true;
+      updateData.temp_password = false;
+    }
+
     const updatedEmployee = await airtableHelpers.update(TABLES.EMPLOYEES, employeeId, updateData);
 
     res.json({
@@ -210,18 +201,40 @@ router.put('/employees/:employeeId', authenticateToken, authorizeRoles(['admin',
       salary: updatedEmployee.fields.salary || null,
       is_active: updatedEmployee.fields.is_active,
       hire_date: updatedEmployee.fields.hire_date || null,
-      driver_license: updatedEmployee.fields.driver_license || null,
-      vehicle_assigned: updatedEmployee.fields.vehicle_assigned || false
+      password_changed: !!new_password
     });
   } catch (error) {
-    console.error('Update employee error:', {
-      message: error.message,
-      stack: error.stack
-    });
+    console.error('Update employee error:', error);
     res.status(500).json({ 
       message: 'Failed to update employee',
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
+  }
+});
+
+// Admin reset user password
+router.post('/employees/:employeeId/reset-password', authenticateToken, authorizeRoles(['admin', 'boss']), async (req, res) => {
+  try {
+    const { employeeId } = req.params;
+    const { new_password } = req.body;
+
+    if (!new_password || new_password.trim().length < 8) {
+      return res.status(400).json({ message: 'Password must be at least 8 characters long' });
+    }
+
+    const hashedPassword = await bcrypt.hash(new_password.trim(), 12);
+    
+    await airtableHelpers.update(TABLES.EMPLOYEES, employeeId, {
+      password_hash: hashedPassword,
+      password_changed_at: new Date().toISOString(),
+      password_set_by_admin: true,
+      temp_password: false
+    });
+
+    res.json({ message: 'Password reset successfully' });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    res.status(500).json({ message: 'Failed to reset password' });
   }
 });
 
@@ -459,51 +472,144 @@ router.patch('/payroll/bulk-update', async (req, res) => {
   }
 });
 
-// Send payslips (placeholder - would integrate with email service)
-router.post('/payroll/send-payslips', async (req, res) => {
+// Send payslips via WhatsApp
+router.post('/payroll/send-payslips', authenticateToken, authorizeRoles(['hr', 'boss']), async (req, res) => {
   try {
     const { payroll_ids } = req.body;
-
-    console.log('Sending payslips for IDs:', payroll_ids);
 
     if (!payroll_ids || payroll_ids.length === 0) {
       return res.status(400).json({ message: 'Payroll IDs are required' });
     }
 
-    let successCount = 0;
-    const errors = [];
+    const whatsappService = require('../utils/whatsapp');
+    const payslipGenerator = require('../utils/payslip-generator');
+    const results = [];
 
-    // Update each payroll record
-    for (const id of payroll_ids) {
+    for (const payrollId of payroll_ids) {
       try {
-        await airtableHelpers.update(TABLES.PAYROLL, id, {
-          payslip_sent: true,
-          payslip_sent_date: new Date().toISOString(),
-          payment_status: 'sent' // Update status to sent
-        });
-        successCount++;
-      } catch (updateError) {
-        console.error(`Error updating payroll ${id}:`, updateError);
-        errors.push({ id, error: updateError.message });
+        const payroll = await airtableHelpers.findById(TABLES.PAYROLL, payrollId);
+        if (!payroll) {
+          results.push({ payrollId, status: 'error', message: 'Payroll record not found' });
+          continue;
+        }
+
+        const employee = await airtableHelpers.findById(TABLES.EMPLOYEES, payroll.employee_id[0]);
+        if (!employee || !employee.phone) {
+          results.push({ payrollId, status: 'error', message: 'Employee phone number not found' });
+          continue;
+        }
+
+        const payslipBuffer = await payslipGenerator.generatePayslip(employee, payroll);
+        const fileName = `Payslip_${employee.full_name.replace(/\s+/g, '_')}_${payroll.period_start}_${payroll.period_end}.pdf`;
+
+        const whatsappResult = await whatsappService.sendPayslip(
+          employee.phone,
+          employee.full_name,
+          payslipBuffer,
+          fileName
+        );
+
+        if (whatsappResult.success) {
+          await airtableHelpers.update(TABLES.PAYROLL, payrollId, {
+            payslip_sent: true,
+            payslip_sent_date: new Date().toISOString(),
+            whatsapp_message_id: whatsappResult.messageId
+          });
+          results.push({ payrollId, status: 'success', message: 'Payslip sent via WhatsApp' });
+        } else {
+          results.push({ payrollId, status: 'error', message: whatsappResult.error });
+        }
+      } catch (error) {
+        results.push({ payrollId, status: 'error', message: error.message });
       }
     }
 
-    // This would integrate with Amazon SES to send actual emails
-    // For now, we simulate email sending
-    console.log(`Simulated sending ${successCount} payslips via email`);
-
-    res.json({ 
-      message: `Payslips sent successfully to ${successCount} employees`,
-      sent_count: successCount,
-      total_requested: payroll_ids.length,
-      errors: errors.length > 0 ? errors : undefined
+    const successCount = results.filter(r => r.status === 'success').length;
+    res.json({
+      message: `Payslip sending completed: ${successCount} sent`,
+      results,
+      summary: { success: successCount, errors: results.length - successCount }
     });
   } catch (error) {
     console.error('Send payslips error:', error);
-    res.status(500).json({ 
-      message: 'Failed to send payslips',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    res.status(500).json({ message: 'Failed to send payslips' });
+  }
+});
+
+// Update employee compensation
+router.put('/employees/:employeeId/compensation', authenticateToken, authorizeRoles(['hr', 'boss']), async (req, res) => {
+  try {
+    const { employeeId } = req.params;
+    const { salary, bonus_eligible, kpi_targets } = req.body;
+
+    const updateData = {};
+    if (salary !== undefined) updateData.salary = parseFloat(salary).toString();
+    if (bonus_eligible !== undefined) updateData.bonus_eligible = bonus_eligible;
+    if (kpi_targets !== undefined) updateData.kpi_targets = JSON.stringify(kpi_targets);
+    
+    const employee = await airtableHelpers.update(TABLES.EMPLOYEES, employeeId, updateData);
+    res.json({ message: 'Compensation updated successfully', employee });
+  } catch (error) {
+    console.error('Update compensation error:', error);
+    res.status(500).json({ message: 'Failed to update compensation' });
+  }
+});
+
+// Generate payroll with bonuses and deductions
+router.post('/payroll/generate-advanced', authenticateToken, authorizeRoles(['hr', 'boss']), async (req, res) => {
+  try {
+    const { employee_ids, period_start, period_end, salary_adjustments = {} } = req.body;
+
+    if (!employee_ids || !period_start || !period_end) {
+      return res.status(400).json({ message: 'Employee IDs, period start, and period end are required' });
+    }
+
+    const payrollRecords = [];
+    for (const employeeId of employee_ids) {
+      const employee = await airtableHelpers.findById(TABLES.EMPLOYEES, employeeId);
+      if (!employee || !employee.is_active) continue;
+
+      const adjustments = salary_adjustments[employeeId] || {};
+      const baseSalary = parseFloat(employee.salary) || 0;
+      const bonuses = parseFloat(adjustments.bonuses) || 0;
+      const kpiBonus = parseFloat(adjustments.kpi_bonus) || 0;
+      const additionalDeductions = parseFloat(adjustments.additional_deductions) || 0;
+      
+      const grossSalary = baseSalary + bonuses + kpiBonus;
+      const standardDeductions = grossSalary * 0.15;
+      const totalDeductions = standardDeductions + additionalDeductions;
+      const netSalary = grossSalary - totalDeductions;
+
+      const payrollData = {
+        employee_id: [employeeId],
+        employee_name: employee.full_name,
+        employee_email: employee.email,
+        employee_phone: employee.phone,
+        period_start,
+        period_end,
+        base_salary: baseSalary.toString(),
+        bonuses: bonuses.toString(),
+        kpi_bonus: kpiBonus.toString(),
+        gross_salary: grossSalary.toString(),
+        deductions: standardDeductions.toString(),
+        additional_deductions: additionalDeductions.toString(),
+        net_salary: netSalary.toString(),
+        payment_status: 'pending',
+        payslip_sent: false,
+        created_at: new Date().toISOString()
+      };
+
+      const payroll = await airtableHelpers.create(TABLES.PAYROLL, payrollData);
+      payrollRecords.push(payroll);
+    }
+
+    res.status(201).json({
+      message: `Generated payroll for ${payrollRecords.length} employees`,
+      payroll: payrollRecords
     });
+  } catch (error) {
+    console.error('Generate advanced payroll error:', error);
+    res.status(500).json({ message: 'Failed to generate payroll' });
   }
 });
 
@@ -543,6 +649,33 @@ router.get('/drivers/stats', authenticateToken, async (req, res) => {
       message: 'Failed to fetch driver statistics',
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
+  }
+});
+
+// Generate individual payslip PDF
+router.get('/payroll/:payrollId/payslip', authenticateToken, authorizeRoles(['hr', 'boss']), async (req, res) => {
+  try {
+    const { payrollId } = req.params;
+    
+    const payroll = await airtableHelpers.findById(TABLES.PAYROLL, payrollId);
+    if (!payroll) {
+      return res.status(404).json({ message: 'Payroll record not found' });
+    }
+
+    const employee = await airtableHelpers.findById(TABLES.EMPLOYEES, payroll.employee_id[0]);
+    if (!employee) {
+      return res.status(404).json({ message: 'Employee not found' });
+    }
+
+    const payslipGenerator = require('../utils/payslip-generator');
+    const payslipBuffer = await payslipGenerator.generatePayslip(employee, payroll);
+    
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="Payslip_${employee.full_name.replace(/\s+/g, '_')}.pdf"`);
+    res.send(payslipBuffer);
+  } catch (error) {
+    console.error('Generate payslip error:', error);
+    res.status(500).json({ message: 'Failed to generate payslip' });
   }
 });
 
