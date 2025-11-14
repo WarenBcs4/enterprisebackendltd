@@ -271,9 +271,9 @@ router.post('/:tableName/bulk', authenticateToken, authorizeRoles(['boss', 'admi
     switch (operation) {
       case 'create':
         for (const recordData of records) {
-          const auditTables = [TABLES.EMPLOYEES, TABLES.STOCK, TABLES.SALES, TABLES.EXPENSES, TABLES.DOCUMENTS];
+          const auditTables = [TABLES.EMPLOYEES, TABLES.SALES, TABLES.EXPENSES];
           const dataToCreate = { ...recordData };
-          if (auditTables.includes(tableName) && tableName !== TABLES.ORDERS) {
+          if (auditTables.includes(tableName)) {
             dataToCreate.created_at = new Date().toISOString();
             if (req.user?.id) {
               dataToCreate.created_by = [req.user.id];
@@ -286,9 +286,9 @@ router.post('/:tableName/bulk', authenticateToken, authorizeRoles(['boss', 'admi
         
       case 'update':
         for (const { id, data } of records) {
-          const auditTables = [TABLES.EMPLOYEES, TABLES.STOCK, TABLES.SALES, TABLES.EXPENSES, TABLES.DOCUMENTS];
+          const auditTables = [TABLES.EMPLOYEES, TABLES.SALES, TABLES.EXPENSES];
           const dataToUpdate = { ...data };
-          if (auditTables.includes(tableName) && tableName !== TABLES.ORDERS) {
+          if (auditTables.includes(tableName)) {
             dataToUpdate.updated_at = new Date().toISOString();
             if (req.user?.id) {
               dataToUpdate.updated_by = [req.user.id];
