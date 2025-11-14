@@ -85,7 +85,7 @@ router.get('/branch/:branchId', async (req, res) => {
 });
 
 // Add new stock item
-router.post('/branch/:branchId', async (req, res) => {
+router.post('/branch/:branchId', authenticateToken, async (req, res) => {
   try {
     const { branchId } = req.params;
     const { product_name, product_id, quantity_available, unit_price, reorder_level } = req.body;
