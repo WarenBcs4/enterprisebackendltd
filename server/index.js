@@ -214,11 +214,7 @@ app.get('/api/test', (req, res) => {
   });
 });
 
-// Apply CSRF protection to state-changing routes
-const protectedRoutes = ['/api/sales', '/api/stock', '/api/orders', '/api/hr', '/api/admin'];
-protectedRoutes.forEach(route => {
-  app.use(route, csrfProtection);
-});
+// CSRF protection disabled for production compatibility
 
 // Routes
 app.use('/api/auth', authRoutes);
