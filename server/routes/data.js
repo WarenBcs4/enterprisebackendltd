@@ -123,11 +123,17 @@ router.post('/:tableName', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'Invalid table name' });
     }
 
-    // Clean data - remove undefined values
+    // Clean data - remove undefined/null values and handle arrays properly
     const recordData = {};
     Object.keys(data).forEach(key => {
-      if (data[key] !== undefined && data[key] !== null) {
-        recordData[key] = data[key];
+      const value = data[key];
+      if (value !== undefined && value !== null && value !== '') {
+        // Handle array fields properly
+        if (Array.isArray(value)) {
+          recordData[key] = value.filter(v => v !== undefined && v !== null && v !== '');
+        } else {
+          recordData[key] = value;
+        }
       }
     });
     
