@@ -220,8 +220,8 @@ app.get('/api/test', (req, res) => {
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/branches', branchRoutes);
-app.use('/api/expenses', expensesRoutes);
-app.use('/api/stock', stockRoutes);
+app.use('/api/expenses', authenticateToken, expensesRoutes);
+app.use('/api/stock', authenticateToken, stockRoutes);
 app.use('/api/sales', authenticateToken, salesRoutes);
 app.use('/api/logistics', authenticateToken, logisticsRoutes);
 app.use('/api/orders', authenticateToken, ordersRoutes);
