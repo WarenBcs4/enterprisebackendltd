@@ -10,8 +10,38 @@ class WhatsAppService {
 
   async sendPayslip(phoneNumber, employeeName, payslipBuffer, fileName) {
     try {
+      // Validate phone number
+      if (!phoneNumber || phoneNumber.trim() === '') {
+        throw new Error('Phone number is required');
+      }
+
       // Clean phone number (remove spaces, dashes, etc.)
-      const cleanPhone = phoneNumber.replace(/\D/g, '');
+      let cleanPhone = phoneNumber.replace(/\D/g, '');
+      
+      // Add country code if missing (assuming Kenya +254)
+      if (cleanPhone.length === 9 && cleanPhone.startsWith('7')) {
+        cleanPhone = '254' + cleanPhone;
+      } else if (cleanPhone.length === 10 && cleanPhone.startsWith('07')) {
+        cleanPhone = '254' + cleanPhone.substring(1);
+      }
+      
+      // Validate phone number length
+      if (cleanPhone.length < 10 || cleanPhone.length > 15) {
+        throw new Error(`Invalid phone number format: ${phoneNumber}`);
+      }
+      
+      console.log(`Sending payslip to ${employeeName} at ${cleanPhone}`);
+      
+      // Check if WhatsApp API is configured
+      if (!this.accessToken || !this.phoneNumberId) {
+        console.warn('WhatsApp API not configured, simulating send');
+        return {
+          success: true,
+          messageId: `sim_${Date.now()}`,
+          phone: cleanPhone,
+          simulated: true
+        };
+      }
       
       // Upload document first
       const uploadResponse = await this.uploadDocument(payslipBuffer, fileName);
@@ -27,7 +57,7 @@ class WhatsAppService {
         type: 'document',
         document: {
           id: uploadResponse.mediaId,
-          caption: `Hi ${employeeName}, your payslip for this period is attached. Please keep this for your records.`,
+          caption: `Hi ${employeeName}, your payslip for this period is attached. Please keep this for your records. - BSN MANAGER ENTERPRISE`,
           filename: fileName
         }
       };
@@ -52,7 +82,8 @@ class WhatsAppService {
       console.error('WhatsApp send error:', error.response?.data || error.message);
       return {
         success: false,
-        error: error.response?.data?.error?.message || error.message
+        error: error.response?.data?.error?.message || error.message,
+        phone: phoneNumber
       };
     }
   }

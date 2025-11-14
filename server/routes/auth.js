@@ -234,7 +234,7 @@ router.post('/register', validateAndSanitize([
 // Login endpoint
 router.post('/login', validateAndSanitize([
   commonValidations.email,
-  body('password').notEmpty().withMessage('Password is required')
+  commonValidations.password
 ]), async (req, res) => {
   try {
     const { email, password } = req.body;

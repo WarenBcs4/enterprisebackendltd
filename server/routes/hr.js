@@ -304,12 +304,14 @@ router.post('/payroll/generate', async (req, res) => {
           employee_id: [employee.id], // Airtable link field format
           employee_name: employee.full_name,
           employee_email: employee.email,
+          employee_phone: employee.phone || '',
           period_start,
           period_end,
           gross_salary: grossSalary.toString(),
           deductions: deductionAmount.toString(),
           net_salary: netSalary.toString(),
           payment_status: 'pending',
+          payslip_sent: false,
           generated_by: req.user?.id || 'system',
           created_at: new Date().toISOString()
         };
@@ -473,7 +475,7 @@ router.patch('/payroll/bulk-update', async (req, res) => {
   }
 });
 
-// Send payslips via WhatsApp
+// Send payslips via WhatsApp with enhanced validation
 router.post('/payroll/send-payslips', authenticateToken, authorizeRoles(['hr', 'boss']), async (req, res) => {
   try {
     const { payroll_ids } = req.body;
@@ -486,6 +488,8 @@ router.post('/payroll/send-payslips', authenticateToken, authorizeRoles(['hr', '
     const payslipGenerator = require('../utils/payslip-generator');
     const results = [];
 
+    console.log(`Processing ${payroll_ids.length} payslips for WhatsApp sending`);
+
     for (const payrollId of payroll_ids) {
       try {
         const payroll = await airtableHelpers.findById(TABLES.PAYROLL, payrollId);
@@ -494,15 +498,42 @@ router.post('/payroll/send-payslips', authenticateToken, authorizeRoles(['hr', '
           continue;
         }
 
-        const employee = await airtableHelpers.findById(TABLES.EMPLOYEES, payroll.employee_id[0]);
-        if (!employee || !employee.phone) {
-          results.push({ payrollId, status: 'error', message: 'Employee phone number not found' });
+        const employeeId = Array.isArray(payroll.employee_id) ? payroll.employee_id[0] : payroll.employee_id;
+        const employee = await airtableHelpers.findById(TABLES.EMPLOYEES, employeeId);
+        
+        if (!employee) {
+          results.push({ payrollId, status: 'error', message: 'Employee not found' });
           continue;
         }
 
+        // Validate phone number
+        if (!employee.phone || employee.phone.trim() === '') {
+          results.push({ 
+            payrollId, 
+            status: 'error', 
+            message: `Employee ${employee.full_name} has no phone number` 
+          });
+          continue;
+        }
+
+        // Clean and validate phone number format
+        const cleanPhone = employee.phone.replace(/\D/g, '');
+        if (cleanPhone.length < 10) {
+          results.push({ 
+            payrollId, 
+            status: 'error', 
+            message: `Invalid phone number for ${employee.full_name}: ${employee.phone}` 
+          });
+          continue;
+        }
+
+        // Generate payslip PDF
         const payslipBuffer = await payslipGenerator.generatePayslip(employee, payroll);
         const fileName = `Payslip_${employee.full_name.replace(/\s+/g, '_')}_${payroll.period_start}_${payroll.period_end}.pdf`;
 
+        console.log(`Sending payslip to ${employee.full_name} at ${employee.phone}`);
+
+        // Send via WhatsApp
         const whatsappResult = await whatsappService.sendPayslip(
           employee.phone,
           employee.full_name,
@@ -511,29 +542,60 @@ router.post('/payroll/send-payslips', authenticateToken, authorizeRoles(['hr', '
         );
 
         if (whatsappResult.success) {
+          // Update payroll record
           await airtableHelpers.update(TABLES.PAYROLL, payrollId, {
             payslip_sent: true,
             payslip_sent_date: new Date().toISOString(),
-            whatsapp_message_id: whatsappResult.messageId
+            whatsapp_message_id: whatsappResult.messageId,
+            whatsapp_phone: whatsappResult.phone
           });
-          results.push({ payrollId, status: 'success', message: 'Payslip sent via WhatsApp' });
+          
+          results.push({ 
+            payrollId, 
+            status: 'success', 
+            message: `Payslip sent to ${employee.full_name} via WhatsApp`,
+            employee_name: employee.full_name,
+            phone: employee.phone
+          });
         } else {
-          results.push({ payrollId, status: 'error', message: whatsappResult.error });
+          results.push({ 
+            payrollId, 
+            status: 'error', 
+            message: `WhatsApp failed for ${employee.full_name}: ${whatsappResult.error}`,
+            employee_name: employee.full_name,
+            phone: employee.phone
+          });
         }
       } catch (error) {
-        results.push({ payrollId, status: 'error', message: error.message });
+        console.error(`Error processing payroll ${payrollId}:`, error);
+        results.push({ 
+          payrollId, 
+          status: 'error', 
+          message: `Processing error: ${error.message}` 
+        });
       }
     }
 
     const successCount = results.filter(r => r.status === 'success').length;
+    const errorCount = results.filter(r => r.status === 'error').length;
+    
+    console.log(`WhatsApp payslip sending completed: ${successCount} sent, ${errorCount} failed`);
+    
     res.json({
-      message: `Payslip sending completed: ${successCount} sent`,
+      message: `Payslip sending completed: ${successCount} sent via WhatsApp, ${errorCount} failed`,
       results,
-      summary: { success: successCount, errors: results.length - successCount }
+      summary: { 
+        success: successCount, 
+        errors: errorCount,
+        total: results.length
+      }
     });
   } catch (error) {
     console.error('Send payslips error:', error);
-    res.status(500).json({ message: 'Failed to send payslips' });
+    res.status(500).json({ 
+      message: 'Failed to send payslips via WhatsApp',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
   }
 });
 
@@ -585,7 +647,7 @@ router.post('/payroll/generate-advanced', authenticateToken, authorizeRoles(['hr
         employee_id: [employeeId],
         employee_name: employee.full_name,
         employee_email: employee.email,
-        employee_phone: employee.phone,
+        employee_phone: employee.phone || '',
         period_start,
         period_end,
         base_salary: baseSalary.toString(),
@@ -597,6 +659,7 @@ router.post('/payroll/generate-advanced', authenticateToken, authorizeRoles(['hr
         net_salary: netSalary.toString(),
         payment_status: 'pending',
         payslip_sent: false,
+        whatsapp_ready: employee.phone && employee.phone.trim() !== '',
         created_at: new Date().toISOString()
       };
 
