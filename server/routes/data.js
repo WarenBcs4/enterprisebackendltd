@@ -116,6 +116,7 @@ router.post('/:tableName', authenticateToken, async (req, res) => {
     
     console.log(`Creating ${tableName} with data:`, JSON.stringify(data, null, 2));
     console.log('User:', req.user);
+    console.log('Table name validation:', tableName, 'Valid tables:', Object.values(TABLES));
     
     // Validate table name
     const validTables = Object.values(TABLES);
@@ -159,8 +160,19 @@ router.post('/:tableName', authenticateToken, async (req, res) => {
     }
 
     console.log(`Final record data for ${tableName}:`, JSON.stringify(recordData, null, 2));
-    const record = await directAirtableHelpers.create(tableName, recordData);
-    res.status(201).json(record);
+    
+    try {
+      const record = await directAirtableHelpers.create(tableName, recordData);
+      console.log(`Successfully created record in ${tableName}:`, record.id);
+      res.status(201).json(record);
+    } catch (airtableError) {
+      console.error(`Airtable creation error for ${tableName}:`, {
+        message: airtableError.message,
+        stack: airtableError.stack,
+        recordData: recordData
+      });
+      throw airtableError;
+    }
   } catch (error) {
     console.error(`Error creating ${req.params.tableName}:`, {
       message: error.message,
