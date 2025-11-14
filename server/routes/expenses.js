@@ -5,7 +5,7 @@ const { authenticateToken, authorizeRoles } = require('../middleware/auth');
 const router = express.Router();
 
 // Get all expenses with filters
-router.get('/', async (req, res) => {
+router.get('/', authenticateToken, async (req, res) => {
   try {
     const { branchId, startDate, endDate, category, vehicleId } = req.query;
     
@@ -88,7 +88,7 @@ router.get('/', async (req, res) => {
 });
 
 // Create new expense
-router.post('/', async (req, res) => {
+router.post('/', authenticateToken, async (req, res) => {
   try {
     const {
       expense_date,
@@ -119,7 +119,7 @@ router.post('/', async (req, res) => {
       amount: parseFloat(amount),
       description: description.trim(),
       created_at: new Date().toISOString(),
-      created_by: [req.user.id]
+      created_by: req.user?.id ? [req.user.id] : undefined
     };
     
     // Add optional fields with proper relationship handling
@@ -161,7 +161,7 @@ router.post('/', async (req, res) => {
 });
 
 // Update expense
-router.put('/:expenseId', async (req, res) => {
+router.put('/:expenseId', authenticateToken, async (req, res) => {
   try {
     const { expenseId } = req.params;
     const {
@@ -206,7 +206,9 @@ router.put('/:expenseId', async (req, res) => {
     if (supplier_name !== undefined) updateData.supplier_name = supplier_name;
     
     updateData.updated_at = new Date().toISOString();
-    updateData.updated_by = [req.user.id];
+    if (req.user?.id) {
+      updateData.updated_by = [req.user.id];
+    }
     
     const expense = await airtableHelpers.update(TABLES.EXPENSES, expenseId, updateData);
     
@@ -235,7 +237,7 @@ router.delete('/:expenseId', authorizeRoles(['admin', 'boss', 'manager']), async
   }
 });
 
-// Get expense categories
+// Get expense categories (no auth required for categories)
 router.get('/categories', (req, res) => {
   const categories = [
     { value: 'fuel', label: 'Fuel & Transportation', icon: '⛽' },
@@ -255,7 +257,7 @@ router.get('/categories', (req, res) => {
 });
 
 // Get expense summary by category
-router.get('/summary', async (req, res) => {
+router.get('/summary', authenticateToken, async (req, res) => {
   try {
     const { branchId, startDate, endDate } = req.query;
     
