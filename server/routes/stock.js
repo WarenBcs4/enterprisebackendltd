@@ -16,6 +16,25 @@ const csrfProtection = (req, res, next) => {
 
 const router = express.Router();
 
+// Test route for debugging
+router.post('/test-create', async (req, res) => {
+  try {
+    console.log('Test create request received');
+    const testData = {
+      product_name: 'Test Product',
+      quantity_available: 10,
+      unit_price: 100,
+      reorder_level: 5,
+      created_at: new Date().toISOString()
+    };
+    console.log('Test data:', testData);
+    res.json({ message: 'Test route working', data: testData });
+  } catch (error) {
+    console.error('Test route error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Get all stock items
 router.get('/', async (req, res) => {
   try {
@@ -90,12 +109,14 @@ router.post('/branch/:branchId', async (req, res) => {
     const { branchId } = req.params;
     const { product_name, product_id, quantity_available, unit_price, reorder_level } = req.body;
 
+    console.log('Stock creation request:', { branchId, body: req.body });
+
     if (!product_name || !quantity_available || !unit_price) {
       return res.status(400).json({ message: 'Product name, quantity, and unit price are required' });
     }
 
     const stockData = {
-      branch_id: [branchId], // Link field requires array
+      branch_id: [branchId],
       product_id: product_id || `PRD_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
       product_name,
       quantity_available: parseInt(quantity_available),
@@ -105,10 +126,17 @@ router.post('/branch/:branchId', async (req, res) => {
       created_at: new Date().toISOString()
     };
 
+    console.log('Creating stock with data:', stockData);
     const newStock = await airtableHelpers.create(TABLES.STOCK, stockData);
+    console.log('Stock created successfully:', newStock.id);
     res.status(201).json(newStock);
   } catch (error) {
-    console.error('Add stock error:', error);
+    console.error('Add stock error details:', {
+      message: error.message,
+      stack: error.stack,
+      branchId: req.params.branchId,
+      body: req.body
+    });
     res.status(500).json({ message: 'Failed to add stock', error: error.message });
   }
 });
