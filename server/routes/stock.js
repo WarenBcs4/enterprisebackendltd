@@ -103,7 +103,7 @@ router.get('/branch/:branchId', authenticateToken, async (req, res) => {
   }
 });
 
-// Add new stock item (generic route) - Updated
+// Create stock item - Main endpoint
 router.post('/', authenticateToken, async (req, res) => {
   try {
     const { branchId, product_name, product_id, quantity_available, unit_price, reorder_level, branch_id } = req.body;
@@ -122,7 +122,7 @@ router.post('/', authenticateToken, async (req, res) => {
     const stockData = {
       branch_id: [targetBranchId],
       product_id: product_id || `PRD_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-      product_name,
+      product_name: product_name.trim(),
       quantity_available: parseInt(quantity_available),
       unit_price: parseFloat(unit_price),
       reorder_level: parseInt(reorder_level) || 10,

@@ -217,7 +217,7 @@ app.get('/api/test', (req, res) => {
 
 // CSRF protection disabled for production compatibility
 
-// Routes
+// Routes with proper authentication
 app.use('/api/auth', authRoutes);
 app.use('/api/branches', branchRoutes);
 app.use('/api/expenses', authenticateToken, expensesRoutes);
@@ -225,10 +225,10 @@ app.use('/api/stock', authenticateToken, stockRoutes);
 app.use('/api/sales', authenticateToken, salesRoutes);
 app.use('/api/logistics', authenticateToken, logisticsRoutes);
 app.use('/api/orders', authenticateToken, ordersRoutes);
-app.use('/api/hr', hrRoutes);
+app.use('/api/hr', authenticateToken, hrRoutes);
 app.use('/api/boss', authenticateToken, authorizeRoles(['boss', 'manager', 'admin']), bossRoutes);
-app.use('/api/manager', managerRoutes);
-app.use('/api/admin', adminRoutes);
+app.use('/api/manager', authenticateToken, managerRoutes);
+app.use('/api/admin', authenticateToken, adminRoutes);
 app.use('/api/accounting', accountingRoutes);
 app.use('/api/receipts', receiptRoutes);
 app.use('/api/reports', reportRoutes);
@@ -237,7 +237,7 @@ app.use('/api/diagnostics', diagnosticsRoutes);
 app.use('/auth', authCallbackRoutes);
 app.use('/api/xero', xeroRoutes);
 app.use('/api/finance', financeRoutes);
-app.use('/api/data', require('./routes/data'));
+app.use('/api/data', authenticateToken, require('./routes/data'));
 
 // Error handling middleware
 app.use((err, req, res, next) => {
