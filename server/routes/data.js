@@ -128,13 +128,15 @@ router.post('/:tableName', authenticateToken, async (req, res) => {
     if (auditTables.includes(tableName) && tableName !== TABLES.ORDERS) {
       recordData.created_at = new Date().toISOString();
       recordData.updated_at = new Date().toISOString();
-      recordData.created_by = req.user.userId;
+      if (req.user?.id) {
+        recordData.created_by = [req.user.id];
+      }
     }
 
     // Add branch_id for branch-specific tables (exclude Orders)
     const branchSpecificTables = [TABLES.STOCK, TABLES.SALES, TABLES.EXPENSES, TABLES.EMPLOYEES];
-    if (branchSpecificTables.includes(tableName) && tableName !== TABLES.ORDERS && req.user.branchId && !recordData.branch_id) {
-      recordData.branch_id = req.user.branchId;
+    if (branchSpecificTables.includes(tableName) && tableName !== TABLES.ORDERS && req.user?.branchId && !recordData.branch_id) {
+      recordData.branch_id = [req.user.branchId];
     }
 
     const record = await directAirtableHelpers.create(tableName, recordData);
@@ -164,7 +166,9 @@ router.put('/:tableName/:recordId', authenticateToken, async (req, res) => {
     const auditTables = [TABLES.EMPLOYEES, TABLES.STOCK, TABLES.SALES, TABLES.EXPENSES, TABLES.DOCUMENTS];
     if (auditTables.includes(tableName) && tableName !== TABLES.ORDERS) {
       updateData.updated_at = new Date().toISOString();
-      updateData.updated_by = req.user.userId;
+      if (req.user?.id) {
+        updateData.updated_by = [req.user.id];
+      }
     }
 
     const record = await directAirtableHelpers.update(tableName, recordId, updateData);
@@ -234,7 +238,9 @@ router.post('/:tableName/bulk', authenticateToken, authorizeRoles(['boss', 'admi
           const dataToCreate = { ...recordData };
           if (auditTables.includes(tableName) && tableName !== TABLES.ORDERS) {
             dataToCreate.created_at = new Date().toISOString();
-            dataToCreate.created_by = req.user.userId;
+            if (req.user?.id) {
+              dataToCreate.created_by = [req.user.id];
+            }
           }
           const record = await directAirtableHelpers.create(tableName, dataToCreate);
           results.push(record);
@@ -247,7 +253,9 @@ router.post('/:tableName/bulk', authenticateToken, authorizeRoles(['boss', 'admi
           const dataToUpdate = { ...data };
           if (auditTables.includes(tableName) && tableName !== TABLES.ORDERS) {
             dataToUpdate.updated_at = new Date().toISOString();
-            dataToUpdate.updated_by = req.user.userId;
+            if (req.user?.id) {
+              dataToUpdate.updated_by = [req.user.id];
+            }
           }
           const record = await directAirtableHelpers.update(tableName, id, dataToUpdate);
           results.push(record);
