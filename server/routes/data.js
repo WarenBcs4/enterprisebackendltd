@@ -131,11 +131,10 @@ router.post('/:tableName', authenticateToken, async (req, res) => {
       }
     });
     
-    // Only add audit fields for tables that support them (exclude Orders)
-    const auditTables = [TABLES.EMPLOYEES, TABLES.STOCK, TABLES.SALES, TABLES.EXPENSES, TABLES.DOCUMENTS];
-    if (auditTables.includes(tableName) && tableName !== TABLES.ORDERS) {
+    // Only add audit fields for tables that support them
+    const auditTables = [TABLES.EMPLOYEES, TABLES.STOCK, TABLES.SALES, TABLES.EXPENSES];
+    if (auditTables.includes(tableName)) {
       recordData.created_at = new Date().toISOString();
-      recordData.updated_at = new Date().toISOString();
       if (req.user?.id) {
         recordData.created_by = [req.user.id];
       }
