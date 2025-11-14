@@ -5,7 +5,7 @@ const { authenticateToken, authorizeRoles } = require('../middleware/auth');
 const router = express.Router();
 
 // Get all expenses with filters
-router.get('/', authenticateToken, async (req, res) => {
+router.get('/', async (req, res) => {
   try {
     const { branchId, startDate, endDate, category, vehicleId } = req.query;
     
@@ -88,7 +88,7 @@ router.get('/', authenticateToken, async (req, res) => {
 });
 
 // Create new expense
-router.post('/', authenticateToken, async (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const {
       expense_date,
@@ -161,7 +161,7 @@ router.post('/', authenticateToken, async (req, res) => {
 });
 
 // Update expense
-router.put('/:expenseId', authenticateToken, async (req, res) => {
+router.put('/:expenseId', async (req, res) => {
   try {
     const { expenseId } = req.params;
     const {
@@ -222,7 +222,7 @@ router.put('/:expenseId', authenticateToken, async (req, res) => {
 });
 
 // Delete expense
-router.delete('/:expenseId', authenticateToken, authorizeRoles(['admin', 'boss', 'manager']), async (req, res) => {
+router.delete('/:expenseId', authorizeRoles(['admin', 'boss', 'manager']), async (req, res) => {
   try {
     const { expenseId } = req.params;
     
@@ -255,7 +255,7 @@ router.get('/categories', (req, res) => {
 });
 
 // Get expense summary by category
-router.get('/summary', authenticateToken, async (req, res) => {
+router.get('/summary', async (req, res) => {
   try {
     const { branchId, startDate, endDate } = req.query;
     
