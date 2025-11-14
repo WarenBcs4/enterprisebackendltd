@@ -146,9 +146,15 @@ router.post('/:tableName', authenticateToken, async (req, res) => {
       }
     }
 
-    // Add branch_id for branch-specific tables (exclude Orders)
+    // Admin-only tables for data submission
+    const adminOnlyTables = [TABLES.STOCK, TABLES.SALES, TABLES.EXPENSES];
+    if (adminOnlyTables.includes(tableName) && req.user?.role !== 'admin') {
+      return res.status(403).json({ message: 'Only admin users can create records in this table' });
+    }
+
+    // Add branch_id for branch-specific tables
     const branchSpecificTables = [TABLES.STOCK, TABLES.SALES, TABLES.EXPENSES, TABLES.EMPLOYEES];
-    if (branchSpecificTables.includes(tableName) && tableName !== TABLES.ORDERS && req.user?.branchId && !recordData.branch_id) {
+    if (branchSpecificTables.includes(tableName) && req.user?.branchId && !recordData.branch_id) {
       recordData.branch_id = [req.user.branchId];
     }
 
@@ -176,6 +182,12 @@ router.put('/:tableName/:recordId', authenticateToken, async (req, res) => {
     const validTables = Object.values(TABLES);
     if (!validTables.includes(tableName)) {
       return res.status(400).json({ message: 'Invalid table name' });
+    }
+
+    // Admin-only tables for data modification
+    const adminOnlyTables = [TABLES.STOCK, TABLES.SALES, TABLES.EXPENSES];
+    if (adminOnlyTables.includes(tableName) && req.user?.role !== 'admin') {
+      return res.status(403).json({ message: 'Only admin users can modify records in this table' });
     }
 
     // Add audit fields only if they exist in the table
@@ -207,6 +219,12 @@ router.delete('/:tableName/:recordId', authenticateToken, async (req, res) => {
     const validTables = Object.values(TABLES);
     if (!validTables.includes(tableName)) {
       return res.status(400).json({ message: 'Invalid table name' });
+    }
+
+    // Admin-only tables for data deletion
+    const adminOnlyTables = [TABLES.STOCK, TABLES.SALES, TABLES.EXPENSES];
+    if (adminOnlyTables.includes(tableName) && req.user?.role !== 'admin') {
+      return res.status(403).json({ message: 'Only admin users can delete records in this table' });
     }
 
     await directAirtableHelpers.delete(tableName, recordId);
