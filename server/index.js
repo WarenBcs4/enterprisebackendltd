@@ -17,6 +17,7 @@ const dataRoutes = require('./routes/data');
 const purchaseReceivesRoutes = require('./routes/purchase-receives');
 const billsRoutes = require('./routes/bills');
 const inventoryAdjustmentsRoutes = require('./routes/inventory-adjustments');
+const logisticsTransactionsRoutes = require('./routes/logistics-transactions');
 const { authenticateToken, authorizeRoles } = require('./middleware/auth');
 
 const app = express();
@@ -127,6 +128,8 @@ app.use('/api/bills', authenticateToken, billsRoutes);
 console.log('Bills routes mounted');
 app.use('/api/inventory-adjustments', authenticateToken, inventoryAdjustmentsRoutes);
 console.log('Inventory adjustments routes mounted');
+app.use('/api/logistics-transactions', authenticateToken, logisticsTransactionsRoutes);
+console.log('Logistics transactions routes mounted');
 console.log('All routes mounted successfully');
 
 app.use((err, req, res, next) => {

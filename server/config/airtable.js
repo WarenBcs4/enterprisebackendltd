@@ -33,7 +33,8 @@ const TABLES = {
   INVENTORY_ADJUSTMENTS: 'Inventory_Adjustments',
   ADJUSTMENT_ITEMS: 'Adjustment_Items',
   PACKAGES: 'Packages',
-  PACKAGE_ITEMS: 'Package_Items'
+  PACKAGE_ITEMS: 'Package_Items',
+  LOGISTICS_TRANSACTIONS: 'Logistics_Transactions'
 };
 
 // Field mappings for relationships
