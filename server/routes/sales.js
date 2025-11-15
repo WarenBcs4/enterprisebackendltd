@@ -45,7 +45,7 @@ router.get('/branch/:branchId', async (req, res) => {
 
 router.post('/', async (req, res) => {
   try {
-    const { branch_id, product_id, quantity_sold, unit_price, total_amount, customer_name, sale_date, items, branchId, payment_method, employee_id } = req.body;
+    const { items, branchId, total_amount } = req.body;
 
     // Handle new format with items array
     if (items && items.length > 0 && branchId) {
@@ -54,50 +54,20 @@ router.post('/', async (req, res) => {
         return sum + (parseInt(item.quantity) * parseFloat(item.unit_price));
       }, 0);
       
-      // Create the main sale record
+      // Create minimal sale record
       const salesData = {
         branch_id: [branchId],
-        total_amount: saleTotal,
-        customer_name: customer_name || '',
-        payment_method: payment_method || 'cash',
-        sale_date: sale_date || new Date().toISOString().split('T')[0],
-        employee_id: employee_id ? [employee_id] : []
+        total_amount: saleTotal
       };
       
       const newSale = await airtableHelpers.create(TABLES.SALES, salesData);
-      
-      // Create sale items
-      const saleItems = [];
-      for (const item of items) {
-        if (!item.quantity || !item.unit_price) {
-          continue;
-        }
-        
-        const saleItemData = {
-          sale_id: [newSale.id],
-          product_name: item.product_name || '',
-          quantity: parseInt(item.quantity),
-          unit_price: parseFloat(item.unit_price),
-          total_price: parseInt(item.quantity) * parseFloat(item.unit_price)
-        };
-        
-        const saleItem = await airtableHelpers.create(TABLES.SALE_ITEMS, saleItemData);
-        saleItems.push(saleItem);
-      }
-      
-      return res.status(201).json({ sale: newSale, items: saleItems });
+      return res.status(201).json(newSale);
     }
     
-    // Handle old format
-    if (!branch_id || !quantity_sold || !unit_price) {
-      return res.status(400).json({ message: 'Branch ID, quantity, and unit price are required' });
-    }
-
+    // Fallback minimal sale
     const salesData = {
-      branch_id: Array.isArray(branch_id) ? branch_id : [branch_id],
-      total_amount: parseFloat(total_amount) || (parseInt(quantity_sold) * parseFloat(unit_price)),
-      customer_name: customer_name || '',
-      sale_date: sale_date || new Date().toISOString().split('T')[0]
+      branch_id: [branchId],
+      total_amount: total_amount || 0
     };
 
     const newSale = await airtableHelpers.create(TABLES.SALES, salesData);
