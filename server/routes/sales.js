@@ -36,13 +36,12 @@ router.post('/', async (req, res) => {
       const results = [];
       
       for (const item of items) {
-        if (!item.product_id || !item.quantity || !item.unit_price) {
+        if (!item.quantity || !item.unit_price) {
           continue;
         }
         
         const salesData = {
           branch_id: [branchId],
-          product_id: item.product_id,
           product_name: item.product_name,
           quantity_sold: parseInt(item.quantity),
           unit_price: parseFloat(item.unit_price),
@@ -63,13 +62,12 @@ router.post('/', async (req, res) => {
     }
     
     // Handle old format
-    if (!branch_id || !product_id || !quantity_sold || !unit_price) {
-      return res.status(400).json({ message: 'Branch ID, product ID, quantity, and unit price are required' });
+    if (!branch_id || !quantity_sold || !unit_price) {
+      return res.status(400).json({ message: 'Branch ID, quantity, and unit price are required' });
     }
 
     const salesData = {
       branch_id: Array.isArray(branch_id) ? branch_id : [branch_id],
-      product_id,
       quantity_sold: parseInt(quantity_sold),
       unit_price: parseFloat(unit_price),
       total_amount: parseFloat(total_amount) || (parseInt(quantity_sold) * parseFloat(unit_price)),
