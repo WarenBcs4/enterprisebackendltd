@@ -15,7 +15,7 @@ router.get('/', async (req, res) => {
 
 router.post('/', async (req, res) => {
   try {
-    const { branch_id, category, amount, description, expense_date } = req.body;
+    const { branch_id, category, amount, description, expense_date, receipt_number, supplier_name } = req.body;
 
     if (!branch_id || !category || !amount) {
       return res.status(400).json({ message: 'Branch ID, category, and amount are required' });
@@ -30,6 +30,10 @@ router.post('/', async (req, res) => {
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
+
+    // Add optional fields if provided
+    if (receipt_number) expenseData.receipt_number = receipt_number;
+    if (supplier_name) expenseData.supplier_name = supplier_name;
 
     const newExpense = await airtableHelpers.create(TABLES.EXPENSES, expenseData);
     res.status(201).json(newExpense);
