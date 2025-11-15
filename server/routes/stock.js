@@ -128,9 +128,23 @@ router.get('/movements/:branchId', async (req, res) => {
 // Multi-product transfer endpoint
 router.post('/transfer', async (req, res) => {
   try {
-    const { fromBranchId, toBranchId, items, reason, requestedBy } = req.body;
+    // Handle both old and new format
+    const { fromBranchId, toBranchId, items, reason, requestedBy, product_id, to_branch_id, from_branch_id, quantity } = req.body;
     
-    if (!fromBranchId || !toBranchId || !items || items.length === 0) {
+    // Convert old format to new format
+    let transferData;
+    if (product_id && to_branch_id && from_branch_id && quantity) {
+      transferData = {
+        fromBranchId: from_branch_id,
+        toBranchId: to_branch_id,
+        items: [{ productId: product_id, quantity: parseInt(quantity) }],
+        reason: reason || 'Stock transfer'
+      };
+    } else {
+      transferData = { fromBranchId, toBranchId, items, reason, requestedBy };
+    }
+    
+    if (!transferData.fromBranchId || !transferData.toBranchId || !transferData.items || transferData.items.length === 0) {
       return res.status(400).json({ message: 'From branch, to branch, and items are required' });
     }
     
@@ -138,7 +152,7 @@ router.post('/transfer', async (req, res) => {
     const transferResults = [];
     
     // Process each item in the transfer
-    for (const item of items) {
+    for (const item of transferData.items) {
       if (!item.productId || !item.quantity || item.quantity <= 0) {
         continue;
       }
@@ -164,17 +178,17 @@ router.post('/transfer', async (req, res) => {
       // Create transfer movement record
       const movement = await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, {
         transfer_id: transferId,
-        from_branch_id: [fromBranchId],
-        to_branch_id: [toBranchId],
+        from_branch_id: [transferData.fromBranchId],
+        to_branch_id: [transferData.toBranchId],
         product_id: item.productId,
         product_name: item.productName,
         quantity: item.quantity,
         movement_type: 'transfer',
-        reason: reason || 'Branch transfer',
+        reason: transferData.reason || 'Branch transfer',
         status: 'pending',
         transfer_date: new Date().toISOString(),
-        created_by: [req.user.id],
-        requested_by: requestedBy || req.user.fullName,
+        created_by: req.user?.id ? [req.user.id] : [],
+        requested_by: transferData.requestedBy || req.user?.fullName || 'System',
         unit_cost: sourceStock[0].unit_price,
         total_cost: item.quantity * sourceStock[0].unit_price
       });

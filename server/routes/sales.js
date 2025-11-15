@@ -29,8 +29,40 @@ router.get('/branch/:branchId', async (req, res) => {
 
 router.post('/', async (req, res) => {
   try {
-    const { branch_id, product_id, quantity_sold, unit_price, total_amount, customer_name, sale_date } = req.body;
+    const { branch_id, product_id, quantity_sold, unit_price, total_amount, customer_name, sale_date, items, branchId, payment_method, employee_id } = req.body;
 
+    // Handle new format with items array
+    if (items && items.length > 0 && branchId) {
+      const results = [];
+      
+      for (const item of items) {
+        if (!item.product_id || !item.quantity || !item.unit_price) {
+          continue;
+        }
+        
+        const salesData = {
+          branch_id: [branchId],
+          product_id: item.product_id,
+          product_name: item.product_name,
+          quantity_sold: parseInt(item.quantity),
+          unit_price: parseFloat(item.unit_price),
+          total_amount: parseInt(item.quantity) * parseFloat(item.unit_price),
+          customer_name: customer_name || '',
+          payment_method: payment_method || 'cash',
+          sale_date: sale_date || new Date().toISOString().split('T')[0],
+          employee_id: employee_id ? [employee_id] : [],
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+        
+        const newSale = await airtableHelpers.create(TABLES.SALES, salesData);
+        results.push(newSale);
+      }
+      
+      return res.status(201).json(results);
+    }
+    
+    // Handle old format
     if (!branch_id || !product_id || !quantity_sold || !unit_price) {
       return res.status(400).json({ message: 'Branch ID, product ID, quantity, and unit price are required' });
     }
