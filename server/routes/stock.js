@@ -134,10 +134,17 @@ router.post('/transfer', async (req, res) => {
     // Convert old format to new format
     let transferData;
     if (product_id && to_branch_id && from_branch_id && quantity) {
+      // Find product name from stock
+      const stockItems = await airtableHelpers.find(
+        TABLES.STOCK,
+        `AND({branch_id} = "${from_branch_id}", {product_id} = "${product_id}")`
+      );
+      const productName = stockItems.length > 0 ? stockItems[0].product_name : product_id;
+      
       transferData = {
         fromBranchId: from_branch_id,
         toBranchId: to_branch_id,
-        items: [{ productId: product_id, quantity: parseInt(quantity) }],
+        items: [{ productId: product_id, productName: productName, quantity: parseInt(quantity) }],
         reason: reason || 'Stock transfer'
       };
     } else {
@@ -165,13 +172,13 @@ router.post('/transfer', async (req, res) => {
       
       if (sourceStock.length === 0) {
         return res.status(400).json({ 
-          message: `Product ${item.productName} not found in source branch` 
+          message: `Product ${item.productId} not found in source branch` 
         });
       }
       
       if (sourceStock[0].quantity_available < item.quantity) {
         return res.status(400).json({ 
-          message: `Insufficient stock for ${item.productName}. Available: ${sourceStock[0].quantity_available}, Requested: ${item.quantity}` 
+          message: `Insufficient stock for ${item.productId}. Available: ${sourceStock[0].quantity_available}, Requested: ${item.quantity}` 
         });
       }
       
@@ -181,7 +188,7 @@ router.post('/transfer', async (req, res) => {
         from_branch_id: [transferData.fromBranchId],
         to_branch_id: [transferData.toBranchId],
         product_id: item.productId,
-        product_name: item.productName,
+        product_name: item.productName || sourceStock[0].product_name,
         quantity: item.quantity,
         movement_type: 'transfer',
         reason: transferData.reason || 'Branch transfer',
@@ -195,7 +202,7 @@ router.post('/transfer', async (req, res) => {
       
       transferResults.push({
         movementId: movement.id,
-        productName: item.productName,
+        productName: item.productName || sourceStock[0].product_name,
         quantity: item.quantity,
         status: 'pending'
       });
