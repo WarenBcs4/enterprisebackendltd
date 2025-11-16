@@ -1,235 +1,571 @@
 const express = require('express');
 const { airtableHelpers, TABLES } = require('../config/airtable');
-const { authenticateToken, auditLog } = require('../middleware/auth');
+const { authenticateToken, authorizeRoles } = require('../middleware/auth');
+const { body, validationResult } = require('express-validator');
 
 const router = express.Router();
 
-// Dashboard endpoints
-router.get('/dashboard/summary', async (req, res) => {
-  try {
-    const { startDate, endDate, branchId } = req.query;
-    const [expenses, bills, payments] = await Promise.all([
-      airtableHelpers.find(TABLES.EXPENSES),
-      airtableHelpers.find(TABLES.BILLS),
-      airtableHelpers.find(TABLES.PAYMENTS_MADE)
-    ]);
-
-    let filteredExpenses = expenses;
-    if (startDate && endDate) {
-      filteredExpenses = expenses.filter(exp => {
-        const expDate = new Date(exp.expense_date);
-        return expDate >= new Date(startDate) && expDate <= new Date(endDate);
-      });
+// Helper function to populate expense with related data
+const populateExpense = async (expense) => {
+  const populated = { ...expense };
+  
+  // Populate branch data
+  if (expense.branch_id && expense.branch_id[0]) {
+    try {
+      const branch = await airtableHelpers.findById(TABLES.BRANCHES, expense.branch_id[0]);
+      populated.branch = {
+        id: branch.id,
+        name: branch.branch_name,
+        location_address: branch.location_address
+      };
+    } catch (error) {
+      populated.branch = null;
     }
-    if (branchId) {
-      filteredExpenses = filteredExpenses.filter(exp => 
-        exp.branch_id && exp.branch_id.includes(branchId)
-      );
+  }
+  
+  // Populate vehicle data
+  if (expense.vehicle_id && expense.vehicle_id[0]) {
+    try {
+      const vehicle = await airtableHelpers.findById(TABLES.VEHICLES, expense.vehicle_id[0]);
+      populated.vehicle = {
+        id: vehicle.id,
+        plate_number: vehicle.plate_number,
+        vehicle_type: vehicle.vehicle_type
+      };
+    } catch (error) {
+      populated.vehicle = null;
     }
-
-    const totalExpenses = filteredExpenses.reduce((sum, exp) => sum + (parseFloat(exp.amount) || 0), 0);
-    const totalBills = bills.reduce((sum, bill) => sum + (parseFloat(bill.total_amount) || 0), 0);
-    const totalPayments = payments.reduce((sum, pay) => sum + (parseFloat(pay.amount) || 0), 0);
-    const outstandingBills = bills.filter(bill => bill.payment_status !== 'paid');
-
-    const categoryBreakdown = filteredExpenses.reduce((acc, exp) => {
-      const category = exp.category || 'other';
-      acc[category] = (acc[category] || 0) + (parseFloat(exp.amount) || 0);
-      return acc;
-    }, {});
-
-    res.json({
-      totalExpenses,
-      totalBills,
-      totalPayments,
-      outstandingAmount: totalBills - totalPayments,
-      expenseCount: filteredExpenses.length,
-      billCount: bills.length,
-      outstandingBillCount: outstandingBills.length,
-      categoryBreakdown,
-      recentExpenses: filteredExpenses.slice(-5)
-    });
-  } catch (error) {
-    console.error('Dashboard summary error:', error);
-    res.status(500).json({ message: 'Failed to fetch dashboard summary' });
   }
-});
-
-router.get('/dashboard/trends', async (req, res) => {
-  try {
-    const { months = 6 } = req.query;
-    const expenses = await airtableHelpers.find(TABLES.EXPENSES);
-    
-    const monthlyData = {};
-    const startDate = new Date();
-    startDate.setMonth(startDate.getMonth() - months);
-    
-    expenses.forEach(exp => {
-      if (exp.expense_date) {
-        const expDate = new Date(exp.expense_date);
-        if (expDate >= startDate) {
-          const monthKey = expDate.toISOString().substring(0, 7);
-          monthlyData[monthKey] = (monthlyData[monthKey] || 0) + (parseFloat(exp.amount) || 0);
-        }
-      }
-    });
-
-    res.json(Object.entries(monthlyData).map(([month, amount]) => ({ month, amount })));
-  } catch (error) {
-    console.error('Trends error:', error);
-    res.status(500).json({ message: 'Failed to fetch trends' });
+  
+  // Populate recorded_by data
+  if (expense.recorded_by && expense.recorded_by[0]) {
+    try {
+      const employee = await airtableHelpers.findById(TABLES.EMPLOYEES, expense.recorded_by[0]);
+      populated.recorded_by = {
+        id: employee.id,
+        full_name: employee.full_name,
+        role: employee.role
+      };
+    } catch (error) {
+      populated.recorded_by = null;
+    }
   }
-});
+  
+  // Remove array fields
+  delete populated.branch_id;
+  delete populated.vehicle_id;
+  
+  return populated;
+};
 
-// Direct expenses
-router.get('/direct', async (req, res) => {
+// 1. Get All Expenses
+router.get('/', authenticateToken, async (req, res) => {
   try {
-    const { category, branchId, startDate, endDate, page = 1, limit = 50 } = req.query;
+    const { 
+      branch_id, 
+      category, 
+      date_from, 
+      date_to, 
+      vehicle_id,
+      recorded_by, 
+      limit = 20, 
+      offset = 0,
+      sort_by = 'expense_date',
+      sort_order = 'desc'
+    } = req.query;
+    
     let expenses = await airtableHelpers.find(TABLES.EXPENSES);
     
-    if (category) expenses = expenses.filter(exp => exp.category === category);
-    if (branchId) expenses = expenses.filter(exp => exp.branch_id && exp.branch_id.includes(branchId));
-    if (startDate && endDate) {
-      expenses = expenses.filter(exp => {
-        const expDate = new Date(exp.expense_date);
-        return expDate >= new Date(startDate) && expDate <= new Date(endDate);
+    // Apply filters
+    if (branch_id) {
+      expenses = expenses.filter(expense => 
+        expense.branch_id && expense.branch_id.includes(branch_id)
+      );
+    }
+    
+    if (category) {
+      expenses = expenses.filter(expense => expense.category === category);
+    }
+    
+    if (date_from) {
+      expenses = expenses.filter(expense => 
+        expense.expense_date >= date_from
+      );
+    }
+    
+    if (date_to) {
+      expenses = expenses.filter(expense => 
+        expense.expense_date <= date_to
+      );
+    }
+    
+    if (vehicle_id) {
+      expenses = expenses.filter(expense => 
+        expense.vehicle_id && expense.vehicle_id.includes(vehicle_id)
+      );
+    }
+    
+    if (recorded_by) {
+      expenses = expenses.filter(expense => 
+        expense.recorded_by && expense.recorded_by.includes(recorded_by)
+      );
+    }
+    
+    // Sort expenses
+    expenses.sort((a, b) => {
+      const aVal = a[sort_by];
+      const bVal = b[sort_by];
+      if (sort_order === 'asc') {
+        return aVal > bVal ? 1 : -1;
+      } else {
+        return aVal < bVal ? 1 : -1;
+      }
+    });
+    
+    // Pagination
+    const total = expenses.length;
+    const paginatedExpenses = expenses.slice(parseInt(offset), parseInt(offset) + parseInt(limit));
+    
+    // Populate related data
+    const populatedExpenses = await Promise.all(
+      paginatedExpenses.map(expense => populateExpense(expense))
+    );
+    
+    res.json({
+      success: true,
+      data: populatedExpenses,
+      pagination: {
+        total,
+        page: Math.floor(parseInt(offset) / parseInt(limit)) + 1,
+        per_page: parseInt(limit),
+        total_pages: Math.ceil(total / parseInt(limit))
+      }
+    });
+  } catch (error) {
+    console.error('Get expenses error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: {
+        code: 'FETCH_ERROR',
+        message: 'Failed to fetch expenses'
+      }
+    });
+  }
+});
+
+// 2. Get Single Expense
+router.get('/:expense_date', authenticateToken, async (req, res) => {
+  try {
+    const { expense_date } = req.params;
+    
+    const expenses = await airtableHelpers.find(TABLES.EXPENSES, `{expense_date} = "${expense_date}"`);
+    
+    if (expenses.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: {
+          code: 'NOT_FOUND',
+          message: 'Expense not found'
+        }
       });
     }
     
-    const startIndex = (page - 1) * limit;
-    const paginatedExpenses = expenses.slice(startIndex, startIndex + parseInt(limit));
+    const expense = expenses[0];
+    const populatedExpense = await populateExpense(expense);
+    
+    // Get related vehicle maintenance if category is maintenance
+    if (expense.category === 'maintenance' && expense.vehicle_id) {
+      try {
+        const maintenance = await airtableHelpers.find(
+          TABLES.VEHICLE_MAINTENANCE,
+          `{vehicle_id} = "${expense.vehicle_id[0]}"`
+        );
+        populatedExpense.vehicle_maintenance = maintenance.map(m => ({
+          id: m.id,
+          maintenance_type: m.maintenance_type,
+          cost: m.cost
+        }));
+      } catch (error) {
+        populatedExpense.vehicle_maintenance = [];
+      }
+    }
     
     res.json({
-      expenses: paginatedExpenses,
-      total: expenses.length,
-      page: parseInt(page),
-      totalPages: Math.ceil(expenses.length / limit)
+      success: true,
+      data: populatedExpense
     });
   } catch (error) {
-    console.error('Get direct expenses error:', error);
-    res.status(500).json({ message: 'Failed to fetch expenses' });
+    console.error('Get expense error:', error);
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'FETCH_ERROR',
+        message: 'Failed to fetch expense'
+      }
+    });
   }
 });
 
-router.get('/', async (req, res) => {
+// 3. Get Expenses by Branch
+router.get('/branches/:branch_id/expenses', authenticateToken, async (req, res) => {
   try {
-    const allExpenses = await airtableHelpers.find(TABLES.EXPENSES);
-    res.json(allExpenses);
+    const { branch_id } = req.params;
+    const { limit = 20, offset = 0 } = req.query;
+    
+    const expenses = await airtableHelpers.find(
+      TABLES.EXPENSES,
+      `FIND("${branch_id}", ARRAYJOIN({branch_id}))`
+    );
+    
+    const total = expenses.length;
+    const paginatedExpenses = expenses.slice(parseInt(offset), parseInt(offset) + parseInt(limit));
+    
+    const populatedExpenses = await Promise.all(
+      paginatedExpenses.map(expense => populateExpense(expense))
+    );
+    
+    res.json({
+      success: true,
+      data: populatedExpenses,
+      pagination: {
+        total,
+        page: Math.floor(parseInt(offset) / parseInt(limit)) + 1,
+        per_page: parseInt(limit),
+        total_pages: Math.ceil(total / parseInt(limit))
+      }
+    });
   } catch (error) {
-    console.error('Get all expenses error:', error);
-    res.status(500).json({ message: 'Failed to fetch expenses' });
+    console.error('Get branch expenses error:', error);
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'FETCH_ERROR',
+        message: 'Failed to fetch branch expenses'
+      }
+    });
   }
 });
 
-router.post('/direct', auditLog('CREATE_EXPENSE'), async (req, res) => {
+// 4. Get Expenses by Vehicle
+router.get('/vehicles/:vehicle_id/expenses', authenticateToken, async (req, res) => {
   try {
-    const { branch_id, category, amount, description, expense_date, receipt_number, supplier_name, vehicle_id } = req.body;
+    const { vehicle_id } = req.params;
+    const { limit = 20, offset = 0 } = req.query;
+    
+    const expenses = await airtableHelpers.find(
+      TABLES.EXPENSES,
+      `FIND("${vehicle_id}", ARRAYJOIN({vehicle_id}))`
+    );
+    
+    const total = expenses.length;
+    const paginatedExpenses = expenses.slice(parseInt(offset), parseInt(offset) + parseInt(limit));
+    
+    const populatedExpenses = await Promise.all(
+      paginatedExpenses.map(expense => populateExpense(expense))
+    );
+    
+    res.json({
+      success: true,
+      data: populatedExpenses,
+      pagination: {
+        total,
+        page: Math.floor(parseInt(offset) / parseInt(limit)) + 1,
+        per_page: parseInt(limit),
+        total_pages: Math.ceil(total / parseInt(limit))
+      }
+    });
+  } catch (error) {
+    console.error('Get vehicle expenses error:', error);
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'FETCH_ERROR',
+        message: 'Failed to fetch vehicle expenses'
+      }
+    });
+  }
+});
 
-    if (!branch_id || !category || !amount) {
-      return res.status(400).json({ message: 'Branch ID, category, and amount are required' });
+// 5. Get Expense Analytics
+router.get('/analytics', authenticateToken, async (req, res) => {
+  try {
+    const { group_by = 'category', date_range, metric = 'sum' } = req.query;
+    
+    let expenses = await airtableHelpers.find(TABLES.EXPENSES);
+    
+    // Apply date range filter
+    if (date_range) {
+      const [start_date, end_date] = date_range.split(',');
+      expenses = expenses.filter(expense => 
+        expense.expense_date >= start_date && expense.expense_date <= end_date
+      );
     }
+    
+    // Group and calculate metrics
+    const analytics = {};
+    
+    for (const expense of expenses) {
+      let groupKey;
+      
+      switch (group_by) {
+        case 'branch':
+          groupKey = expense.branch_id ? expense.branch_id[0] : 'unknown';
+          break;
+        case 'category':
+          groupKey = expense.category || 'unknown';
+          break;
+        case 'vehicle':
+          groupKey = expense.vehicle_id ? expense.vehicle_id[0] : 'no_vehicle';
+          break;
+        case 'month':
+          groupKey = expense.expense_date ? expense.expense_date.substring(0, 7) : 'unknown';
+          break;
+        default:
+          groupKey = 'all';
+      }
+      
+      if (!analytics[groupKey]) {
+        analytics[groupKey] = {
+          count: 0,
+          sum: 0,
+          expenses: []
+        };
+      }
+      
+      analytics[groupKey].count++;
+      analytics[groupKey].sum += parseFloat(expense.amount) || 0;
+      analytics[groupKey].expenses.push(expense);
+    }
+    
+    // Calculate final metrics
+    const result = {};
+    for (const [key, data] of Object.entries(analytics)) {
+      switch (metric) {
+        case 'sum':
+          result[key] = data.sum;
+          break;
+        case 'avg':
+          result[key] = data.count > 0 ? data.sum / data.count : 0;
+          break;
+        case 'count':
+          result[key] = data.count;
+          break;
+        default:
+          result[key] = {
+            sum: data.sum,
+            avg: data.count > 0 ? data.sum / data.count : 0,
+            count: data.count
+          };
+      }
+    }
+    
+    res.json({
+      success: true,
+      data: result,
+      group_by,
+      metric,
+      total_expenses: expenses.length,
+      total_amount: expenses.reduce((sum, exp) => sum + (parseFloat(exp.amount) || 0), 0)
+    });
+  } catch (error) {
+    console.error('Get expense analytics error:', error);
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'ANALYTICS_ERROR',
+        message: 'Failed to generate expense analytics'
+      }
+    });
+  }
+});
 
+// Validation middleware for expense creation
+const validateExpense = [
+  body('expense_date').isISO8601().withMessage('Valid expense date is required'),
+  body('branch_id').notEmpty().withMessage('Branch ID is required'),
+  body('category').isIn(['fuel', 'maintenance', 'utilities', 'vehicle_related', 'other']).withMessage('Invalid category'),
+  body('amount').isFloat({ min: 0.01 }).withMessage('Amount must be positive'),
+  body('description').optional().isLength({ max: 1000 }).withMessage('Description too long'),
+  body('vehicle_id').optional().notEmpty(),
+  body('recorded_by').notEmpty().withMessage('Recorded by is required')
+];
+
+// 1. Create New Expense
+router.post('/', authenticateToken, authorizeRoles(['manager', 'admin', 'boss']), validateExpense, async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid expense data',
+          details: errors.array().map(err => ({
+            field: err.path,
+            message: err.msg
+          }))
+        }
+      });
+    }
+    
+    const {
+      expense_date,
+      branch_id,
+      category,
+      amount,
+      description,
+      vehicle_id,
+      recorded_by
+    } = req.body;
+    
+    // Validate branch exists
+    try {
+      await airtableHelpers.findById(TABLES.BRANCHES, branch_id);
+    } catch (error) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Branch does not exist'
+        }
+      });
+    }
+    
+    // Validate vehicle exists if provided
+    if (vehicle_id) {
+      try {
+        await airtableHelpers.findById(TABLES.VEHICLES, vehicle_id);
+      } catch (error) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: 'Vehicle does not exist'
+          }
+        });
+      }
+    }
+    
+    // Validate employee exists
+    try {
+      await airtableHelpers.findById(TABLES.EMPLOYEES, recorded_by);
+    } catch (error) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Employee does not exist'
+        }
+      });
+    }
+    
     const expenseData = {
-      branch_id: Array.isArray(branch_id) ? branch_id : [branch_id],
+      expense_date,
+      branch_id: [branch_id],
       category,
       amount: parseFloat(amount),
       description: description || '',
-      expense_date: expense_date || new Date().toISOString().split('T')[0],
-      recorded_by: [req.user.id]
+      recorded_by: [recorded_by],
+      created_at: new Date().toISOString()
     };
-
-    if (receipt_number) expenseData.receipt_number = receipt_number;
-    if (supplier_name) expenseData.supplier_name = supplier_name;
-    if (vehicle_id && category === 'vehicle_related') expenseData.vehicle_id = [vehicle_id];
-
-    const newExpense = await airtableHelpers.create(TABLES.EXPENSES, expenseData);
-    res.status(201).json(newExpense);
-  } catch (error) {
-    console.error('Add expense error:', error);
-    res.status(500).json({ message: 'Failed to add expense', error: error.message });
-  }
-});
-
-router.post('/', async (req, res) => {
-  try {
-    const { branch_id, category, amount, description, expense_date, receipt_number, supplier_name } = req.body;
-
-    if (!branch_id || !category || !amount) {
-      return res.status(400).json({ message: 'Branch ID, category, and amount are required' });
+    
+    if (vehicle_id) {
+      expenseData.vehicle_id = [vehicle_id];
     }
-
-    const expenseData = {
-      branch_id: Array.isArray(branch_id) ? branch_id : [branch_id],
-      category,
-      amount: parseFloat(amount),
-      description: description || '',
-      expense_date: expense_date || new Date().toISOString().split('T')[0]
-    };
-
-    // Add optional fields if provided
-    if (receipt_number) expenseData.receipt_number = receipt_number;
-    if (supplier_name) expenseData.supplier_name = supplier_name;
-
+    
     const newExpense = await airtableHelpers.create(TABLES.EXPENSES, expenseData);
-    res.status(201).json(newExpense);
+    const populatedExpense = await populateExpense(newExpense);
+    
+    res.status(201).json({
+      success: true,
+      message: 'Expense created successfully',
+      data: populatedExpense
+    });
   } catch (error) {
-    console.error('Add expense error:', error);
-    res.status(500).json({ message: 'Failed to add expense', error: error.message });
+    console.error('Create expense error:', error);
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'CREATE_ERROR',
+        message: 'Failed to create expense'
+      }
+    });
   }
 });
 
-router.put('/direct/:expenseId', auditLog('UPDATE_EXPENSE'), async (req, res) => {
+// 2. Bulk Create Expenses
+router.post('/bulk', authenticateToken, authorizeRoles(['manager', 'admin', 'boss']), async (req, res) => {
   try {
-    const { expenseId } = req.params;
-    const updateData = {
-      ...req.body,
-      updated_at: new Date().toISOString(),
-      updated_by: [req.user.id]
-    };
-
-    const updatedExpense = await airtableHelpers.update(TABLES.EXPENSES, expenseId, updateData);
-    res.json(updatedExpense);
+    const { expenses } = req.body;
+    
+    if (!Array.isArray(expenses) || expenses.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Expenses array is required'
+        }
+      });
+    }
+    
+    const results = [];
+    const errors = [];
+    
+    for (let i = 0; i < expenses.length; i++) {
+      const expense = expenses[i];
+      
+      try {
+        // Validate required fields
+        if (!expense.expense_date || !expense.branch_id || !expense.category || !expense.amount) {
+          errors.push({
+            index: i,
+            message: 'Missing required fields'
+          });
+          continue;
+        }
+        
+        const expenseData = {
+          expense_date: expense.expense_date,
+          branch_id: [expense.branch_id],
+          category: expense.category,
+          amount: parseFloat(expense.amount),
+          description: expense.description || '',
+          recorded_by: [expense.recorded_by],
+          created_at: new Date().toISOString()
+        };
+        
+        if (expense.vehicle_id) {
+          expenseData.vehicle_id = [expense.vehicle_id];
+        }
+        
+        const newExpense = await airtableHelpers.create(TABLES.EXPENSES, expenseData);
+        const populatedExpense = await populateExpense(newExpense);
+        results.push(populatedExpense);
+      } catch (error) {
+        errors.push({
+          index: i,
+          message: error.message
+        });
+      }
+    }
+    
+    res.status(201).json({
+      success: true,
+      message: `Created ${results.length} expenses`,
+      data: {
+        created: results,
+        errors: errors
+      }
+    });
   } catch (error) {
-    console.error('Update expense error:', error);
-    res.status(500).json({ message: 'Failed to update expense' });
-  }
-});
-
-router.put('/:expenseId', async (req, res) => {
-  try {
-    const { expenseId } = req.params;
-    const updateData = {
-      ...req.body,
-      updated_at: new Date().toISOString()
-    };
-
-    const updatedExpense = await airtableHelpers.update(TABLES.EXPENSES, expenseId, updateData);
-    res.json(updatedExpense);
-  } catch (error) {
-    console.error('Update expense error:', error);
-    res.status(500).json({ message: 'Failed to update expense' });
-  }
-});
-
-router.delete('/direct/:expenseId', auditLog('DELETE_EXPENSE'), async (req, res) => {
-  try {
-    const { expenseId } = req.params;
-    await airtableHelpers.delete(TABLES.EXPENSES, expenseId);
-    res.json({ message: 'Expense deleted successfully' });
-  } catch (error) {
-    console.error('Delete expense error:', error);
-    res.status(500).json({ message: 'Failed to delete expense' });
-  }
-});
-
-router.delete('/:expenseId', async (req, res) => {
-  try {
-    const { expenseId } = req.params;
-    await airtableHelpers.delete(TABLES.EXPENSES, expenseId);
-    res.json({ message: 'Expense deleted successfully' });
-  } catch (error) {
-    console.error('Delete expense error:', error);
-    res.status(500).json({ message: 'Failed to delete expense' });
+    console.error('Bulk create expenses error:', error);
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'BULK_CREATE_ERROR',
+        message: 'Failed to create expenses'
+      }
+    });
   }
 });
 
