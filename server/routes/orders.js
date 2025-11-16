@@ -141,24 +141,48 @@ router.post('/', authenticateToken, authorizeRoles(['admin', 'manager', 'boss'])
     // Create order items in ORDER_ITEMS table
     const orderItems = [];
     for (const item of items) {
-      const orderItem = await airtableHelpers.create(TABLES.ORDER_ITEMS, {
-        order_id: [order.id],
-        product_name: item.product_name,
-        quantity_ordered: Number(item.quantity_ordered),
-        purchase_price_per_unit: Number(item.purchase_price_per_unit),
-        quantity_received: 0,
-        branch_destination_id: item.branch_destination_id ? [item.branch_destination_id] : null
-      });
-      orderItems.push(orderItem);
+      try {
+        const orderItemData = {
+          order_id: [order.id],
+          product_name: item.product_name,
+          quantity_ordered: Number(item.quantity_ordered),
+          purchase_price_per_unit: Number(item.purchase_price_per_unit),
+          quantity_received: 0
+        };
+        
+        // Only add branch_destination_id if it exists
+        if (item.branch_destination_id) {
+          orderItemData.branch_destination_id = [item.branch_destination_id];
+        }
+        
+        const orderItem = await airtableHelpers.create(TABLES.ORDER_ITEMS, orderItemData);
+        orderItems.push(orderItem);
+      } catch (itemError) {
+        console.log('Failed to create order item:', itemError.message);
+        // Continue with other items even if one fails
+      }
     }
 
     res.status(201).json({
       message: 'Order created successfully',
-      order: { ...order, items: orderItems }
+      order: { 
+        ...order, 
+        items: orderItems,
+        itemsCreated: orderItems.length,
+        totalItems: items.length
+      }
     });
   } catch (error) {
     console.error('Create order error:', error);
     console.error('Error details:', error.message);
+    console.error('Error stack:', error.stack);
+    
+    // Check if response was already sent
+    if (res.headersSent) {
+      console.log('Response already sent, cannot send error response');
+      return;
+    }
+    
     res.status(500).json({ 
       message: 'Failed to create order', 
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
