@@ -443,7 +443,6 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
           unit_price: item.purchasePrice,
           last_updated: new Date().toISOString()
         };
-        if (userId !== 'system') updateData.updated_by = userId;
         
         stockResult = await airtableHelpers.update(TABLES.STOCK, existingProduct.id, updateData);
       } else {
@@ -457,7 +456,6 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
           unit_price: item.purchasePrice,
           last_updated: new Date().toISOString()
         };
-        if (userId !== 'system') stockData.created_by = userId;
         
         stockResult = await airtableHelpers.create(TABLES.STOCK, stockData);
       }
@@ -466,17 +464,16 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
       const movementData = {
         transfer_id: transferId,
         to_branch_id: [item.branchDestinationId],
-        product_id: productId,
         product_name: item.productName,
         quantity: item.quantityOrdered,
         movement_type: 'purchase_order',
-        reason: `Stock added from completed order #${order.id}`,
+        reason: `Stock added from completed order #${orderId}`,
         status: 'completed',
         transfer_date: new Date().toISOString(),
         unit_cost: item.purchasePrice,
-        total_cost: item.quantityOrdered * item.purchasePrice
+        total_cost: item.quantityOrdered * item.purchasePrice,
+        created_at: new Date().toISOString()
       };
-      if (userId !== 'system') movementData.created_by = [userId];
       
       const movementResult = await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, movementData);
 
@@ -503,8 +500,8 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
         processed: true
       });
 
-      // Update order item if it exists
-      if (item.orderItemId && item.orderItemId !== 'manual_1763278630548') {
+      // Update order item if it exists and is not manual
+      if (item.orderItemId && !item.orderItemId.startsWith('manual_')) {
         try {
           await airtableHelpers.update(TABLES.ORDER_ITEMS, item.orderItemId, {
             quantity_received: item.quantityOrdered,
