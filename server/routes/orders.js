@@ -401,8 +401,9 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
     const { orderId } = req.params;
     const { completedItems } = req.body;
 
-    console.log('Completing order:', orderId);
-    console.log('Completed items:', completedItems);
+    if (!completedItems || !Array.isArray(completedItems) || completedItems.length === 0) {
+      return res.status(400).json({ message: 'Completed items are required' });
+    }
 
     // Get the order to validate
     const order = await airtableHelpers.findById(TABLES.ORDERS, orderId);
@@ -414,11 +415,10 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
     const allStock = await airtableHelpers.find(TABLES.STOCK);
     const transferReceipts = [];
     const processedItems = [];
+    const userId = req.user?.id || 'system';
 
     // Process each completed item
     for (const item of completedItems) {
-      console.log('Processing item:', item);
-      
       if (!item.branchDestinationId || !item.quantityOrdered || item.quantityOrdered <= 0) {
         continue;
       }
@@ -438,32 +438,32 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
       if (existingProduct) {
         // Update existing product - add quantity
         const newQuantity = (existingProduct.quantity_available || 0) + item.quantityOrdered;
-        stockResult = await airtableHelpers.update(TABLES.STOCK, existingProduct.id, {
+        const updateData = {
           quantity_available: newQuantity,
-          unit_price: item.purchasePrice, // Update with latest purchase price
-          last_updated: new Date().toISOString(),
-          updated_by: req.user.id
-        });
+          unit_price: item.purchasePrice,
+          last_updated: new Date().toISOString()
+        };
+        if (userId !== 'system') updateData.updated_by = userId;
         
-        console.log(`Updated existing product: ${item.productName}, new quantity: ${newQuantity}`);
+        stockResult = await airtableHelpers.update(TABLES.STOCK, existingProduct.id, updateData);
       } else {
         // Create new product entry
-        stockResult = await airtableHelpers.create(TABLES.STOCK, {
+        const stockData = {
           branch_id: [item.branchDestinationId],
           product_id: productId,
           product_name: item.productName,
           quantity_available: item.quantityOrdered,
-          reorder_level: 10, // Default reorder level
+          reorder_level: 10,
           unit_price: item.purchasePrice,
-          last_updated: new Date().toISOString(),
-          created_by: req.user.id
-        });
+          last_updated: new Date().toISOString()
+        };
+        if (userId !== 'system') stockData.created_by = userId;
         
-        console.log(`Created new product: ${item.productName}, quantity: ${item.quantityOrdered}`);
+        stockResult = await airtableHelpers.create(TABLES.STOCK, stockData);
       }
 
       // Create stock movement record for tracking
-      const movementResult = await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, {
+      const movementData = {
         transfer_id: transferId,
         to_branch_id: [item.branchDestinationId],
         product_id: productId,
@@ -471,13 +471,14 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
         quantity: item.quantityOrdered,
         movement_type: 'purchase_order',
         reason: `Stock added from completed order #${order.id}`,
-        order_id: [orderId],
         status: 'completed',
         transfer_date: new Date().toISOString(),
-        created_by: [req.user.id],
         unit_cost: item.purchasePrice,
         total_cost: item.quantityOrdered * item.purchasePrice
-      });
+      };
+      if (userId !== 'system') movementData.created_by = [userId];
+      
+      const movementResult = await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, movementData);
 
       // Generate transfer receipt data
       const receipt = {
@@ -503,7 +504,7 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
       });
 
       // Update order item if it exists
-      if (item.orderItemId) {
+      if (item.orderItemId && item.orderItemId !== 'manual_1763278630548') {
         try {
           await airtableHelpers.update(TABLES.ORDER_ITEMS, item.orderItemId, {
             quantity_received: item.quantityOrdered,
@@ -520,8 +521,7 @@ router.post('/:orderId/complete', authenticateToken, authorizeRoles(['admin', 'm
     const orderUpdate = {
       status: 'completed',
       completed_at: new Date().toISOString(),
-      total_transfers: transferReceipts.length,
-      transfer_receipts: JSON.stringify(transferReceipts)
+      total_transfers: transferReceipts.length
     };
     
     // Auto-pay order when completed
