@@ -74,40 +74,67 @@ router.post('/', async (req, res) => {
       return sum + (Number(item.quantity) * Number(item.unit_price));
     }, 0);
     
-    // Try minimal sale creation first
+    // Create sale with only existing fields
     const salesData = {
       total_amount: saleTotal,
       sale_date: sale_date || new Date().toISOString().split('T')[0]
     };
     
-    // Add fields that exist
+    // Add fields that exist in Airtable
     if (branchId) salesData.branch_id = [branchId];
     if (customer_name) salesData.customer_name = customer_name;
     if (payment_method) salesData.payment_method = payment_method;
-    if (employee_id) salesData.employee_id = [employee_id];
+    // Skip employee_id as it doesn't exist in Sales table
     
     console.log('Creating sale with data:', salesData);
     const newSale = await airtableHelpers.create(TABLES.SALES, salesData);
     console.log('Sale created successfully:', newSale);
     
-    // Try creating one sale item
-    const firstItem = items[0];
-    const saleItemData = {
-      sale_id: [newSale.id],
-      product_name: firstItem.product_name,
-      quantity: Number(firstItem.quantity),
-      unit_price: Number(firstItem.unit_price)
-    };
-    
-    console.log('Creating sale item with data:', saleItemData);
-    const saleItem = await airtableHelpers.create(TABLES.SALE_ITEMS, saleItemData);
-    console.log('Sale item created successfully:', saleItem);
+    // Create all sale items and reduce stock
+    const saleItems = [];
+    for (const item of items) {
+      if (!item.quantity || !item.unit_price || !item.product_name) continue;
+      
+      // Create sale item
+      const saleItemData = {
+        sale_id: [newSale.id],
+        product_name: item.product_name,
+        quantity: Number(item.quantity),
+        unit_price: Number(item.unit_price)
+      };
+      
+      try {
+        const saleItem = await airtableHelpers.create(TABLES.SALE_ITEMS, saleItemData);
+        saleItems.push(saleItem);
+        console.log('Sale item created:', saleItem.id);
+        
+        // Reduce stock
+        const stockItem = existingStock.find(s => {
+          const matchesBranch = s.branch_id && s.branch_id.includes(branchId);
+          const matchesProduct = (item.product_id && s.product_id === item.product_id) ||
+                               (s.product_name && s.product_name.toLowerCase().trim() === item.product_name.toLowerCase().trim());
+          return matchesBranch && matchesProduct;
+        });
+        
+        if (stockItem && stockItem.quantity_available >= Number(item.quantity)) {
+          const newQuantity = stockItem.quantity_available - Number(item.quantity);
+          await airtableHelpers.update(TABLES.STOCK, stockItem.id, {
+            quantity_available: newQuantity
+          });
+          console.log(`Stock reduced: ${item.product_name} from ${stockItem.quantity_available} to ${newQuantity}`);
+        } else {
+          console.log(`Stock issue for ${item.product_name}:`, stockItem ? `insufficient (${stockItem.quantity_available} < ${item.quantity})` : 'not found');
+        }
+      } catch (itemError) {
+        console.error('Sale item error:', itemError.message);
+      }
+    }
     
     res.status(201).json({ 
       success: true,
       sale: newSale, 
-      items: [saleItem],
-      message: 'Sale created successfully (debug mode)'
+      items: saleItems,
+      message: 'Sale created successfully'
     });
   } catch (error) {
     console.error('=== SALE ERROR ===');
