@@ -13,7 +13,7 @@ router.get('/test', (req, res) => {
   });
 });
 
-// Test sale creation
+// Test sale creation and show table schemas
 router.post('/test-sale', async (req, res) => {
   try {
     console.log('Test sale request:', req.body);
@@ -32,6 +32,11 @@ router.post('/test-sale', async (req, res) => {
         sampleSale: sales[0] || null,
         sampleSaleItem: saleItems[0] || null,
         sampleStock: stock[0] || null
+      },
+      schemas: {
+        salesFields: sales[0] ? Object.keys(sales[0]) : [],
+        saleItemsFields: saleItems[0] ? Object.keys(saleItems[0]) : [],
+        stockFields: stock[0] ? Object.keys(stock[0]) : []
       }
     });
   } catch (error) {
@@ -107,11 +112,11 @@ router.post('/', async (req, res) => {
     for (const item of items) {
       if (!item.quantity || !item.unit_price || !item.product_name) continue;
       
-      // Create sale item
+      // Create sale item with correct field names
       const saleItem = await airtableHelpers.create(TABLES.SALE_ITEMS, {
         sale_id: [newSale.id],
         product_name: item.product_name,
-        quantity: Number(item.quantity),
+        quantity_sold: Number(item.quantity),
         unit_price: Number(item.unit_price)
       });
       saleItems.push(saleItem);
@@ -381,8 +386,8 @@ router.get('/items/by-sale/:saleId', async (req, res) => {
     
     const summary = {
       total_items: saleItems.length,
-      total_quantity: saleItems.reduce((sum, item) => sum + (item.quantity || 0), 0),
-      total_value: saleItems.reduce((sum, item) => sum + ((item.quantity || 0) * (item.unit_price || 0)), 0)
+      total_quantity: saleItems.reduce((sum, item) => sum + (item.quantity_sold || 0), 0),
+      total_value: saleItems.reduce((sum, item) => sum + ((item.quantity_sold || 0) * (item.unit_price || 0)), 0)
     };
     
     res.json({ items: saleItems, summary });
@@ -406,9 +411,8 @@ router.post('/items', async (req, res) => {
     const saleItemData = {
       sale_id: [sale_id],
       product_name,
-      quantity: parseInt(quantity),
-      unit_price: parseFloat(unit_price),
-      total_price: parseInt(quantity) * parseFloat(unit_price)
+      quantity_sold: parseInt(quantity),
+      unit_price: parseFloat(unit_price)
     };
     
     const newSaleItem = await airtableHelpers.create(TABLES.SALE_ITEMS, saleItemData);
@@ -416,7 +420,8 @@ router.post('/items', async (req, res) => {
     // Update sale total
     const sale = await airtableHelpers.findById(TABLES.SALES, sale_id);
     if (sale) {
-      const newTotal = (sale.total_amount || 0) + (parseInt(quantity) * parseFloat(unit_price));
+      const itemTotal = parseInt(quantity) * parseFloat(unit_price);
+      const newTotal = (sale.total_amount || 0) + itemTotal;
       await airtableHelpers.update(TABLES.SALES, sale_id, {
         total_amount: newTotal,
         updated_at: new Date().toISOString()
