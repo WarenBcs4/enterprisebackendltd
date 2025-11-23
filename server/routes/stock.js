@@ -355,6 +355,15 @@ async function reduceStockFromBranch(branchId, productName, quantity) {
 router.get('/transfers/pending/:branchId', async (req, res) => {
   try {
     const { branchId } = req.params;
+    console.log(`Getting pending transfers for branch: ${branchId}`);
+    
+    // First get all transfers to debug
+    const allMovements = await airtableHelpers.find(TABLES.STOCK_MOVEMENTS);
+    console.log(`Total movements in database: ${allMovements.length}`);
+    
+    if (allMovements.length > 0) {
+      console.log('Sample movement:', allMovements[0]);
+    }
     
     // Get transfers where this branch is either sender or receiver
     let filterFormula = '';
@@ -362,10 +371,13 @@ router.get('/transfers/pending/:branchId', async (req, res) => {
       filterFormula = `OR({to_branch_id} = "${branchId}", {from_branch_id} = "${branchId}")`;
     }
     
+    console.log('Filter formula:', filterFormula);
     const allTransfers = await airtableHelpers.find(TABLES.STOCK_MOVEMENTS, filterFormula);
+    console.log(`Transfers matching filter: ${allTransfers.length}`);
     
     // Filter out completed transfers (those with approved_by field)
     const pendingTransfers = allTransfers.filter(transfer => !transfer.approved_by);
+    console.log(`Pending transfers after filtering: ${pendingTransfers.length}`);
     
     // Add transfer direction info
     const transfersWithDirection = pendingTransfers.map(transfer => ({
@@ -374,7 +386,7 @@ router.get('/transfers/pending/:branchId', async (req, res) => {
       canApprove: transfer.to_branch_id?.[0] === branchId // Only receiving branch can approve
     }));
     
-    console.log(`Found ${transfersWithDirection.length} pending transfers for branch ${branchId}`);
+    console.log(`Final result: ${transfersWithDirection.length} transfers`);
     res.json(transfersWithDirection);
   } catch (error) {
     console.error('Get pending transfers error:', error);
