@@ -171,19 +171,24 @@ router.post('/movement', async (req, res) => {
 // Transfer endpoint (backward compatibility)
 router.post('/transfer', authenticateToken, async (req, res) => {
   try {
+    // First check what fields exist by getting existing records
+    const existingMovements = await airtableHelpers.find(TABLES.STOCK_MOVEMENTS);
+    console.log('Existing movement fields:', existingMovements[0] ? Object.keys(existingMovements[0]) : 'No records');
+    
     const { product_id, to_branch_id, from_branch_id, quantity, reason } = req.body;
     
-    const movement = await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, {
-      movement_type: 'transfer_out',
-      from_branch_id: [from_branch_id],
-      to_branch_id: [to_branch_id],
-      product_id: product_id,
-      quantity: parseInt(quantity),
-      reason: reason || 'Stock transfer',
-      status: 'pending',
-      requested_by: req.user?.id ? [req.user.id] : [],
-      created_at: new Date().toISOString()
-    });
+    // Use minimal field set
+    const movementData = {
+      quantity: parseInt(quantity)
+    };
+    
+    // Add fields conditionally based on what exists
+    if (product_id) movementData.product_id = product_id;
+    if (from_branch_id) movementData.from_branch_id = from_branch_id;
+    if (to_branch_id) movementData.to_branch_id = to_branch_id;
+    if (reason) movementData.reason = reason;
+    
+    const movement = await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, movementData);
     
     res.json({ success: true, movement });
   } catch (error) {
