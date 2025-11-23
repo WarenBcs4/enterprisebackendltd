@@ -18,6 +18,22 @@ router.post('/test', (req, res) => {
   res.json({ success: true, message: 'Test endpoint working', body: req.body });
 });
 
+// Check Stock_Movements table structure
+router.get('/check-movements', async (req, res) => {
+  try {
+    const movements = await airtableHelpers.find(TABLES.STOCK_MOVEMENTS);
+    const fields = movements.length > 0 ? Object.keys(movements[0]) : 'No records found';
+    res.json({ 
+      success: true, 
+      recordCount: movements.length,
+      availableFields: fields,
+      sampleRecord: movements[0] || null
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 router.get('/', async (req, res) => {
   try {
     const allStock = await airtableHelpers.find(TABLES.STOCK);
@@ -181,14 +197,17 @@ router.post('/transfer', authenticateToken, async (req, res) => {
   try {
     const { product_id, to_branch_id, from_branch_id, quantity, reason } = req.body;
     
-    // Create movement record in Airtable
+    // Use correct Stock_Movements fields
     const movementData = {
+      from_branch_id: [from_branch_id],
+      to_branch_id: [to_branch_id],
       product_id: product_id,
       quantity: parseInt(quantity),
-      transfer_date: new Date().toISOString().split('T')[0]
+      status: 'pending',
+      movement_type: 'transfer'
     };
     
-    if (reason) movementData.reason = reason;
+    if (req.user?.id) movementData.requested_by = [req.user.id];
     
     console.log('Creating movement with data:', movementData);
     const movement = await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, movementData);
