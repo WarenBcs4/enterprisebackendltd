@@ -18,6 +18,20 @@ router.post('/test', (req, res) => {
   res.json({ success: true, message: 'Test endpoint working', body: req.body });
 });
 
+// Get all movements for debugging
+router.get('/movements/all', async (req, res) => {
+  try {
+    const allMovements = await airtableHelpers.find(TABLES.STOCK_MOVEMENTS);
+    res.json({ 
+      success: true, 
+      count: allMovements.length,
+      movements: allMovements 
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Check Stock_Movements table structure
 router.get('/check-movements', async (req, res) => {
   try {
