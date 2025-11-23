@@ -337,24 +337,31 @@ async function reduceStockFromBranch(branchId, productName, quantity) {
   }
 }
 
-// Get pending transfers for approval
+// Get pending transfers for a branch (both incoming and outgoing)
 router.get('/transfers/pending/:branchId', async (req, res) => {
   try {
     const { branchId } = req.params;
     
-    // Get all transfers for this branch (since we can't filter by status)
+    // Get transfers where this branch is either sender or receiver
     let filterFormula = '';
     if (branchId !== 'all') {
-      filterFormula = `{to_branch_id} = "${branchId}"`;
+      filterFormula = `OR({to_branch_id} = "${branchId}", {from_branch_id} = "${branchId}")`;
     }
     
     const allTransfers = await airtableHelpers.find(TABLES.STOCK_MOVEMENTS, filterFormula);
     
-    // Filter out transfers that have been approved (have approved_by field)
+    // Filter out completed transfers (those with approved_by field)
     const pendingTransfers = allTransfers.filter(transfer => !transfer.approved_by);
     
-    console.log(`Found ${pendingTransfers.length} pending transfers for branch ${branchId}`);
-    res.json(pendingTransfers);
+    // Add transfer direction info
+    const transfersWithDirection = pendingTransfers.map(transfer => ({
+      ...transfer,
+      direction: transfer.to_branch_id?.[0] === branchId ? 'incoming' : 'outgoing',
+      canApprove: transfer.to_branch_id?.[0] === branchId // Only receiving branch can approve
+    }));
+    
+    console.log(`Found ${transfersWithDirection.length} pending transfers for branch ${branchId}`);
+    res.json(transfersWithDirection);
   } catch (error) {
     console.error('Get pending transfers error:', error);
     res.status(500).json({ message: 'Failed to fetch pending transfers' });
