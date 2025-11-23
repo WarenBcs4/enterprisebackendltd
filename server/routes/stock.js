@@ -410,72 +410,7 @@ router.put('/transfers/:transferId/approve', authenticateToken, async (req, res)
       return res.status(404).json({ message: 'Transfer not found' });
     }
     
-    // Update transfer record with approval
-    await airtableHelpers.update(TABLES.STOCK_MOVEMENTS, transferId, {
-      approved_by: [req.user.id],
-      approved_at: new Date().toISOString()
-    });
-    
-    // Update stock quantities
-    const { from_branch_id, to_branch_id, product_id, quantity } = transfer;
-    
-    // Reduce stock from source branch
-    if (from_branch_id && from_branch_id[0]) {
-      const sourceStock = await airtableHelpers.find(
-        TABLES.STOCK,
-        `AND({branch_id} = "${from_branch_id[0]}", {product_id} = "${product_id}")`
-      );
-      
-      if (sourceStock.length > 0) {
-        const newQuantity = Math.max(0, sourceStock[0].quantity_available - quantity);
-        await airtableHelpers.update(TABLES.STOCK, sourceStock[0].id, {
-          quantity_available: newQuantity,
-          last_updated: new Date().toISOString()
-        });
-      }
-    }
-    
-    // Add stock to destination branch
-    if (to_branch_id && to_branch_id[0]) {
-      const destStock = await airtableHelpers.find(
-        TABLES.STOCK,
-        `AND({branch_id} = "${to_branch_id[0]}", {product_id} = "${product_id}")`
-      );
-      
-      if (destStock.length > 0) {
-        // Update existing stock
-        const newQuantity = destStock[0].quantity_available + quantity;
-        await airtableHelpers.update(TABLES.STOCK, destStock[0].id, {
-          quantity_available: newQuantity,
-          last_updated: new Date().toISOString()
-        });
-      } else {
-        // Create new stock entry
-        const sourceStockItem = await airtableHelpers.find(
-          TABLES.STOCK,
-          `AND({branch_id} = "${from_branch_id[0]}", {product_id} = "${product_id}")`
-        );
-        
-        if (sourceStockItem.length > 0) {
-          await airtableHelpers.create(TABLES.STOCK, {
-            branch_id: [to_branch_id[0]],
-            product_id: product_id,
-            product_name: sourceStockItem[0].product_name,
-            quantity_available: quantity,
-            unit_price: sourceStockItem[0].unit_price || 0,
-            reorder_level: sourceStockItem[0].reorder_level || 10,
-            last_updated: new Date().toISOString()
-          });
-        }
-      }
-    }
-    
-    res.json({ success: true, message: 'Transfer approved and stock updated' });
-  } catch (error) {
-    console.error('Approve transfer error:', error);
-    res.status(500).json({ message: 'Failed to approve transfer', error: error.message });
-  }
-});
+    const processedItems = [];
     
     // Process each movement
     for (const movement of movements) {

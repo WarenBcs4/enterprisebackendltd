@@ -37,8 +37,7 @@ const corsOptions = {
       const allowedOrigins = [
         'https://kabisakabisa-enterprise-ltd.vercel.app',
         'https://kabisakabisa-enterprise-ltd-j49p.vercel.app',
-        'https://kabisakabisa-enterprise-ltd-1osy.vercel.app',
-        'https://kabisakabisa-enterprise-ltd-git-main-warenodhiambo1s-projects.vercel.app'
+        'https://kabisakabisa-enterprise-ltd-1osy.vercel.app'
       ];
       if (allowedOrigins.includes(origin)) {
         return callback(null, true);
