@@ -175,15 +175,29 @@ router.post('/movement', async (req, res) => {
 });
 
 // Transfer endpoint (backward compatibility)
-router.post('/transfer', (req, res) => {
+router.post('/transfer', authenticateToken, async (req, res) => {
   console.log('Transfer endpoint called with:', req.body);
   
   try {
-    // Just return success for now to test if endpoint is reachable
+    const { product_id, to_branch_id, from_branch_id, quantity, reason } = req.body;
+    
+    // Create movement record in Airtable
+    const movementData = {
+      product_id: product_id,
+      quantity: parseInt(quantity),
+      transfer_date: new Date().toISOString().split('T')[0]
+    };
+    
+    if (reason) movementData.reason = reason;
+    
+    console.log('Creating movement with data:', movementData);
+    const movement = await airtableHelpers.create(TABLES.STOCK_MOVEMENTS, movementData);
+    console.log('Movement created:', movement);
+    
     res.json({ 
       success: true, 
-      message: 'Transfer endpoint reached successfully',
-      receivedData: req.body
+      message: 'Transfer created successfully',
+      movement: movement
     });
   } catch (error) {
     console.error('Transfer error:', error);
