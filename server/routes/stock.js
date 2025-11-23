@@ -177,7 +177,7 @@ router.post('/transfer', authenticateToken, async (req, res) => {
       movement_type: 'transfer_out',
       from_branch_id: [from_branch_id],
       to_branch_id: [to_branch_id],
-      product_name: product_id,
+      product_id: product_id,
       quantity: parseInt(quantity),
       reason: reason || 'Stock transfer',
       status: 'pending',
