@@ -355,38 +355,25 @@ async function reduceStockFromBranch(branchId, productName, quantity) {
 router.get('/transfers/pending/:branchId', async (req, res) => {
   try {
     const { branchId } = req.params;
-    console.log(`Getting pending transfers for branch: ${branchId}`);
     
-    // First get all transfers to debug
+    // Get all movements and filter in JavaScript (simpler approach)
     const allMovements = await airtableHelpers.find(TABLES.STOCK_MOVEMENTS);
-    console.log(`Total movements in database: ${allMovements.length}`);
     
-    if (allMovements.length > 0) {
-      console.log('Sample movement:', allMovements[0]);
-    }
+    // Filter for this branch (either sender or receiver) and not approved
+    const relevantTransfers = allMovements.filter(transfer => {
+      const isRelevant = (transfer.to_branch_id && transfer.to_branch_id.includes(branchId)) ||
+                        (transfer.from_branch_id && transfer.from_branch_id.includes(branchId));
+      const isPending = !transfer.approved_by;
+      return isRelevant && isPending;
+    });
     
-    // Get transfers where this branch is either sender or receiver
-    let filterFormula = '';
-    if (branchId !== 'all') {
-      filterFormula = `OR({to_branch_id} = "${branchId}", {from_branch_id} = "${branchId}")`;
-    }
-    
-    console.log('Filter formula:', filterFormula);
-    const allTransfers = await airtableHelpers.find(TABLES.STOCK_MOVEMENTS, filterFormula);
-    console.log(`Transfers matching filter: ${allTransfers.length}`);
-    
-    // Filter out completed transfers (those with approved_by field)
-    const pendingTransfers = allTransfers.filter(transfer => !transfer.approved_by);
-    console.log(`Pending transfers after filtering: ${pendingTransfers.length}`);
-    
-    // Add transfer direction info
-    const transfersWithDirection = pendingTransfers.map(transfer => ({
+    // Add direction info
+    const transfersWithDirection = relevantTransfers.map(transfer => ({
       ...transfer,
-      direction: transfer.to_branch_id?.[0] === branchId ? 'incoming' : 'outgoing',
-      canApprove: transfer.to_branch_id?.[0] === branchId // Only receiving branch can approve
+      direction: (transfer.to_branch_id && transfer.to_branch_id.includes(branchId)) ? 'incoming' : 'outgoing',
+      canApprove: (transfer.to_branch_id && transfer.to_branch_id.includes(branchId))
     }));
     
-    console.log(`Final result: ${transfersWithDirection.length} transfers`);
     res.json(transfersWithDirection);
   } catch (error) {
     console.error('Get pending transfers error:', error);
